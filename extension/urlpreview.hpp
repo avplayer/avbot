@@ -32,5 +32,6 @@ public:
 	// on_message 回调.
 	void operator()( boost::property_tree::ptree message );
 private:
+	bool can_preview(std::string speaker, std::string url);
 	void do_urlpreview(std::string speaker, std::string url, boost::posix_time::ptime current);
 };

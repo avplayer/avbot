@@ -1,3 +1,4 @@
+#include <string>
 #include <algorithm>
 #include <boost/date_time/time_duration.hpp>
 #include <boost/algorithm/string.hpp>
@@ -214,14 +215,51 @@ void urlpreview::operator()( boost::property_tree::ptree message )
 	// 使用 boost_regex_search
 	boost::regex ex( "https?://[^ 】]*" );
 	boost::cmatch what;
-
-	if( boost::regex_search( txt.c_str(), what, ex ) )
+	
+	while(boost::regex_search( txt.c_str(), what, ex ))
 	{
-		// 检查到 URL ?
 		std::string url = what[0];
 		do_urlpreview(speaker, boost::trim_copy(url), boost::posix_time::from_time_t(std::time(NULL)));
+		
+		txt.erase(0,txt.find_first_not_of(what[0]));
 	}
 }
+
+bool urlpreview::can_preview(std::string speaker, std::string urlstr)
+{
+	boost::regex ex;
+	// 内置数据库, 然后是 ${qqlog}/blockurls.txt
+	
+	avhttp::url url(urlstr);
+
+	if(url.host() == "web.qq.com" || url.host() =="web2.qq.com")
+	{
+		return false;
+	}
+	
+	// 遍历 blockurls.txt, 每个都是正则表达式!
+	try{
+
+		std::ifstream blockurls("blockurls");
+		while(!blockurls.eof())
+		{
+			std::string urlregex;
+			std::getline(blockurls, urlregex);
+			if(urlregex.empty())
+				break;
+			try{
+				ex.set_expression(urlregex);
+				if(boost::regex_match(urlstr.c_str(), ex))
+					return false;
+			}catch(const boost::regex_error&){}
+		}
+
+	}catch(const std::runtime_error&)
+	{
+	}
+	return true;
+}
+
 
 static bool find_url(std::string url, const std::pair<std::string, boost::posix_time::ptime> & item)
 {
@@ -230,6 +268,9 @@ static bool find_url(std::string url, const std::pair<std::string, boost::posix_
 
 void urlpreview::do_urlpreview(std::string speaker, std::string url, boost::posix_time::ptime current )
 {
+	// 先查看黑名单, 符合黑名单要求的要过滤掉
+	if(!can_preview(speaker,url))
+		return;
 	boost::posix_time::time_duration jiange = boost::posix_time::minutes(99);
 	// 到 urllist 里找一下是否有重复的.
 	if (!urllist->empty()){
@@ -243,8 +284,8 @@ void urlpreview::do_urlpreview(std::string speaker, std::string url, boost::posi
 	}
 	urllist->push_back(std::make_pair(url, current));
 
-	if (jiange.minutes() >= 1){
-		// 超过一分钟了,  应该说了.
+	if (jiange.minutes() >= 5){
+		// 超过5分钟了,  应该说了.
 		// 把真正的工作交给真正的 urlpreview
 		detail::urlpreview( io_service, m_sender, speaker, url);
 	}
