@@ -241,7 +241,7 @@ bool urlpreview::can_preview(std::string speaker, std::string urlstr)
 	try{
 
 		std::ifstream blockurls("blockurls");
-		while(!blockurls.eof())
+		while(blockurls.is_open() && !blockurls.eof())
 		{
 			std::string urlregex;
 			std::getline(blockurls, urlregex);

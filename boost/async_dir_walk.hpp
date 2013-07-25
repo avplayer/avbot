@@ -4,7 +4,6 @@
 #include <boost/function.hpp>
 #include <boost/asio.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/asio/yield.hpp>
 
 #include <boost/avloop.hpp>
 
@@ -31,14 +30,14 @@ public:
 	void operator()( boost::asio::coroutine coro, boost::system::error_code ec )
 	{
 		// 好了，每次回调检查一个文件，这样才好，对吧.
-		reenter( &coro )
+		BOOST_ASIO_CORO_REENTER( &coro )
 		{
 			for( ; dir_it_cur != dir_it_end ; dir_it_cur++ )
 			{
 				// 好，处理 dir_it_cur dir_it_;
-				yield dir_walk_handler(dir_it_cur->path(), io_service.wrap(boost::bind( *this, coro , _1)) );
+				BOOST_ASIO_CORO_YIELD dir_walk_handler(dir_it_cur->path(), io_service.wrap(boost::bind( *this, coro , _1)) );
 
-				yield avloop_idle_post(io_service, boost::bind( *this, coro, ec ) );
+				BOOST_ASIO_CORO_YIELD avloop_idle_post(io_service, boost::bind( *this, coro, ec ) );
 			}
 
 			avloop_idle_post(io_service, boost::asio::detail::bind_handler(complete_handler, ec));
@@ -60,6 +59,8 @@ async_dir_walk<DirWalkHandler, CompleteHandler> make_async_dir_walk_op( boost::a
 
 
 } // namespace detail
+
+typedef function<void(boost::system::error_code ec) > async_dir_walk_continue_handler;
 
 template<class DirWalkHandler>
 void async_dir_walk(boost::asio::io_service & io_service, boost::filesystem::path path, DirWalkHandler dir_walk_handler)

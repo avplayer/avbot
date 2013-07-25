@@ -240,7 +240,7 @@ private:
 			status = 9;
 
 		if ( status >= 0 && status <= 8){
-			ec = boost::system::error_code(status, error::error_category());
+			ec = error::make_error_code(static_cast<error::errc_t>(status));
 		}else{
 			ec = error::login_failed_other;
 		}
