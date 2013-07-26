@@ -4,3 +4,9 @@
 [submodule "avproxy"]
 	path = avproxy
 	url = git://github.com/avplayer/avproxy.git
+[submodule "avboost"]
+	path = avboost
+	url = git://github.com/avplayer/avboost.git
+[submodule "deCAPTCHA"]
+	path = deCAPTCHA
+	url = git://github.com/avplayer/deCAPTCHA.git

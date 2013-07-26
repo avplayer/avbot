@@ -3,7 +3,13 @@ EXTRA_DIST = CMakeLists.txt test.cpp
 
 SUBDIRS = gloox
 
-AM_CPPFLAGS = -I ${srcdir}/gloox -I ${top_srcdir} -I ${top_srcdir}/avproxy/include
+AM_CPPFLAGS = -DAVHTTP_ENABLE_OPENSSL \
+		-I ${top_srcdir}/avproxy/include \
+		-I ${top_srcdir}/avhttp/include \
+		-I ${top_srcdir}/avboost/include \
+		-I ${top_srcdir}/deCAPTCHA/include
+
+AM_CPPFLAGS += -I ${srcdir}/gloox
 
 noinst_LTLIBRARIES = libxmpp.la
 

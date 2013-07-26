@@ -1,7 +1,11 @@
 
 EXTRA_DIST = impl utf CMakeLists.txt README.md
 
-AM_CPPFLAGS = -I${top_srcdir}/avhttp/include -I${top_srcdir}/avproxy/include -I${top_srcdir}
+AM_CPPFLAGS = -DAVHTTP_ENABLE_OPENSSL \
+		-I ${top_srcdir}/avproxy/include \
+		-I ${top_srcdir}/avhttp/include \
+		-I ${top_srcdir}/avboost/include \
+		-I ${top_srcdir}/deCAPTCHA/include
 
 noinst_LTLIBRARIES = libwebqq.la
 

@@ -1,7 +1,12 @@
 
 EXTRA_DIST = CMakeLists.txt README.md
 
-AM_CPPFLAGS = -I${top_srcdir} -I${top_srcdir}/avhttp/include -I${top_srcdir}/avproxy/include @LUAJIT_CFLAGS@
+AM_CPPFLAGS = -DAVHTTP_ENABLE_OPENSSL \
+		-I ${top_srcdir}/avproxy/include \
+		-I ${top_srcdir}/avhttp/include \
+		-I ${top_srcdir}/avboost/include \
+		-I ${top_srcdir}/deCAPTCHA/include \
+		@LUAJIT_CFLAGS@
 
 noinst_LTLIBRARIES = libextension.la
 

@@ -7,7 +7,11 @@ AUTOMAKE_OPTIONS = color-tests parallel-tests
 
 SUBDIRS = libmailexchange libwebqq libxmpp libirc libavbot libavlog extension
 
-AM_CPPFLAGS = -DAVHTTP_ENABLE_OPENSSL -I ${srcdir}/avproxy/include -I ${srcdir}/avhttp/include
+AM_CPPFLAGS = -DAVHTTP_ENABLE_OPENSSL \
+		-I ${top_srcdir}/avproxy/include \
+		-I ${top_srcdir}/avhttp/include \
+		-I ${top_srcdir}/avboost/include \
+		-I ${top_srcdir}/deCAPTCHA/include
 
 bin_PROGRAMS = avbot
 
