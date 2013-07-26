@@ -14,7 +14,7 @@ namespace webqq{
 namespace detail
 {
 
-void clean_cache_dir_walk_handler( boost::asio::io_service & io_service, const boost::filesystem::path & item, boost::function<void( const boost::system::error_code& )> handler )
+void clean_cache_dir_walk_handler( boost::asio::io_service & io_service, const boost::filesystem::path & item, boost::async_dir_walk_continue_handler handler )
 {
 	using namespace boost::system;
 
