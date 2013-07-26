@@ -61,6 +61,7 @@ namespace po = boost::program_options;
 #include "deCAPTCHA/antigate_decoder.hpp"
 #include "deCAPTCHA/avplayer_free_decoder.hpp"
 #include "deCAPTCHA/jsdati_decoder.hpp"
+#include "deCAPTCHA/hydati_decoder.hpp"
 
 #ifndef QQBOT_VERSION
 #ifdef PACKAGE_VERSION
@@ -294,6 +295,7 @@ int main( int argc, char *argv[] )
 	std::string chanelmap;
 	std::string mailaddr, mailpasswd, pop3server, smtpserver;
 	std::string jsdati_username, jsdati_password;
+	std::string hydati_key;
 	std::string deathbycaptcha_username, deathbycaptcha_password;
 	//http://api.dbcapi.me/in.php
 	//http://antigate.com/in.php
@@ -341,6 +343,8 @@ int main( int argc, char *argv[] )
 
 	( "jsdati_username", po::value<std::string>( &jsdati_username ),	console_out_str("联众打码服务账户").c_str() )
 	( "jsdati_password", po::value<std::string>( &jsdati_password ),	console_out_str("联众打码服务密码").c_str() )
+
+	( "hydati_key", po::value<std::string>( &hydati_key ),	console_out_str("慧眼答题服务key").c_str() )
 
 	( "deathbycaptcha_username", po::value<std::string>( &deathbycaptcha_username ),	console_out_str("阿三解码服务账户").c_str() )
 	( "deathbycaptcha_password", po::value<std::string>( &deathbycaptcha_password ),	console_out_str("阿三解码服务密码").c_str() )
@@ -459,6 +463,15 @@ int main( int argc, char *argv[] )
 	// 连接到 std input
 	connect_stdinput(boost::bind(&avbot_vc_feed_input::call_this_to_feed_line, &vcinput, _1));
 	mybot.on_message.connect(boost::bind(&avbot_vc_feed_input::call_this_to_feed_message, &vcinput, _1));
+
+	if(!hydati_key.empty())
+	{
+		decaptcha.add_decoder(
+			decaptcha::decoder::hydati_decoder(
+				io_service, hydati_key
+			)
+		);
+	}
 
 	if(!jsdati_username.empty() && !jsdati_password.empty())
 	{
