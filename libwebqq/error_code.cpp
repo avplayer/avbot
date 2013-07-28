@@ -43,7 +43,8 @@ std::string webqq::error::error_category_impl::message(int e) const
 
 		case fetch_verifycode_failed:
 			return "cannot fetch verifycode";
-
+		case failed_to_change_status:
+			return "cannot change status";
 		case poll_failed_network_error:
 			return "failed to poll message, network error";
 		case failed_to_fetch_group_list:

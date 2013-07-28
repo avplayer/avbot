@@ -82,24 +82,23 @@ public:
 		//处理!
 		try {
 			js::read_json( response, json );
-			js::write_json( std::cout, json );
 
 			if( json.get<std::string>( "retcode" ) == "0" ) {
 				m_webqq->m_psessionid = json.get_child( "result" ).get<std::string>( "psessionid" );
 				m_webqq->m_vfwebqq = json.get_child( "result" ).get<std::string>( "vfwebqq" );
 				m_webqq->m_status = LWQQ_STATUS_ONLINE;
 
-				m_handler(boost::system::error_code());
+				m_webqq->get_ioservice().post(
+					boost::asio::detail::bind_handler(m_handler,boost::system::error_code())
+				);
 				return;
 			}
-		} catch( const pt::json_parser_error & jserr ) {
-			BOOST_LOG_TRIVIAL(error) <<  __FILE__ << " : " <<__LINE__ << " :" <<  "parse json error :" <<  jserr.what();
-		} catch( const pt::ptree_bad_path & jserr ) {
+		} catch( const pt::ptree_error & jserr ) {
 			BOOST_LOG_TRIVIAL(error) <<  __FILE__ << " : " <<__LINE__ << " :" << "parse bad path error : " <<  jserr.what();
 		}
 		}
 
-		m_handler(boost::system::errc::make_error_code(boost::system::errc::protocol_error));
+		m_handler(error::make_error_code(error::failed_to_change_status));
 	}
 private:
 	boost::shared_ptr<qqimpl::WebQQ> m_webqq;

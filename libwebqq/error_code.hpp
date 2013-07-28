@@ -65,6 +65,7 @@ enum errc_t
 
 	fetch_verifycode_failed,
 
+	failed_to_change_status,
 
 	// 登录后的一些错误消息.
 
