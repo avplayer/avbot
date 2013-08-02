@@ -77,6 +77,19 @@ find_package(OpenSSL)
 add_definitions(-DQQBOT_VERSION=\"7.1\")
 add_definitions(-DAVHTTP_ENABLE_OPENSSL)
 
+set(WITH_EMPTY OFF)
+set(WITH_SQLITE ON)
+set(WITH_BOOST ON)
+set(WITH_FIREBIRD OFF)
+set(WITH_MYSQL OFF)
+set(WITH_ODBC OFF)
+set(WITH_ORACLE OFF)
+set(WITH_POSTGRESQL OFF)
+set(SOCI_STATIC ON)
+set(SOCI_TESTS OFF)
+set(WITH_DB2 OFF)
+add_subdirectory(soci/src)
+
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})
 include_directories(avboost/include)
@@ -94,6 +107,8 @@ add_subdirectory(deCAPTCHA)
 add_subdirectory(libavbot)
 add_subdirectory(libavlog)
 add_subdirectory(extension)
+
+
 
 add_executable(avbot avbot_rpc_server.cpp main.cpp botctl.cpp input.cpp avbot.rc)
 

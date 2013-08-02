@@ -36,8 +36,6 @@
 
 #include "constant.hpp"
 
-#include "lwqq_cookie.hpp"
-
 namespace webqq {
 namespace qqimpl {
 namespace detail {
@@ -80,7 +78,6 @@ public:
 			// 接着获得验证码.
 
 			m_webqq->m_clientid.clear();
-			m_webqq->m_cookies.clear();
 			m_webqq->m_groups.clear();
 			m_webqq->m_psessionid.clear();
 			m_webqq->m_vfwebqq.clear();
@@ -149,9 +146,7 @@ public:
 				/* We need get the ptvfsession from the header "Set-Cookie" */
 				if(type == "0")
 				{
-					update_cookies(&(m_webqq->m_cookies), stream->response_options().header_string(), "ptvfsession");
-					m_webqq->m_cookies.update();
-
+					m_webqq->m_cookie_mgr.set_cookie(*stream);
 					m_handler(boost::system::error_code(), vc);
 					return;
 				}

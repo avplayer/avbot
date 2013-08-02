@@ -35,8 +35,6 @@ namespace js = boost::property_tree::json_parser;
 
 #include "constant.hpp"
 
-#include "lwqq_cookie.hpp"
-
 namespace webqq {
 namespace qqimpl {
 namespace detail {
@@ -63,8 +61,7 @@ public:
 	}
 	void operator()(boost::system::error_code ec, std::size_t bytes_transfered)
 	{
-		detail::update_cookies( &(m_webqq->m_cookies), m_stream->response_options().header_string() , "verifysession");
-		m_webqq->m_cookies.update();
+		m_webqq->m_cookie_mgr.set_cookie(*m_stream);
 
 		std::string vcimg;
 		vcimg.resize(bytes_transfered);

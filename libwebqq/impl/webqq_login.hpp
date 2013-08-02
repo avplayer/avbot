@@ -42,7 +42,6 @@ namespace js = boost::property_tree::json_parser;
 
 #include "constant.hpp"
 
-#include "lwqq_cookie.hpp"
 #include "lwqq_status.hpp"
 
 namespace webqq {
@@ -130,7 +129,7 @@ public:
 		m_stream = boost::make_shared<avhttp::http_stream>(boost::ref(m_webqq->get_ioservice()));
 		m_stream->request_options(
 			avhttp::request_opts()
-			(avhttp::http_options::cookie, m_webqq->m_cookies.lwcookies)
+			(avhttp::http_options::cookie, m_webqq->m_cookie_mgr.get_cookie(url)())
 			(avhttp::http_options::connection, "close")
 		);
 
@@ -142,7 +141,6 @@ public:
 	// 在这里实现　QQ 的登录.
 	void operator()(boost::system::error_code ec, std::size_t bytes_transfered)
 	{
-		std::string url;
 		BOOST_ASIO_CORO_REENTER(this)
 		{
 			if( ( check_login( ec, bytes_transfered ) == 0 ) && ( m_webqq->m_status == LWQQ_STATUS_ONLINE ) )
@@ -151,7 +149,7 @@ public:
 				m_stream = boost::make_shared<avhttp::http_stream>(boost::ref(m_webqq->get_ioservice()));
 				m_stream->request_options(
 					avhttp::request_opts()
-					(avhttp::http_options::cookie, buildcookie())
+					(avhttp::http_options::cookie, m_webqq->m_cookie_mgr.get_cookie(m_next_url)())
 					(avhttp::http_options::connection, "close")
 					(avhttp::http_options::referer, "https://ui.ptlogin2.qq.com/cgi-bin/login?daid=164&target=self&style=5&mibao_css=m_webqq&appid=1003903&enable_qlogin=0&no_verifyimg=1&s_url=http%3A%2F%2Fweb2.qq.com%2Floginproxy.html&f_url=loginerroralert&strong_login=1&login_state=10&t=20130723001")
 					(avhttp::http_options::accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -165,12 +163,12 @@ public:
 				BOOST_ASIO_CORO_YIELD avhttp::async_read_body(
 					* m_stream, m_next_url, *m_buffer,	*this);
 
-				save_cookie( &( m_webqq->m_cookies ), m_stream->response_options().header_string() );
+				m_webqq->m_cookie_mgr.set_cookie(*m_stream);
 				m_buffer = boost::make_shared<boost::asio::streambuf>();
 
 				if (ec == avhttp::errc::found){
 					BOOST_ASIO_CORO_YIELD avhttp::async_read_body(*m_stream, m_stream->location(), *m_buffer, *this);
-					save_cookie( &( m_webqq->m_cookies ), m_stream->response_options().header_string() );
+					m_webqq->m_cookie_mgr.set_cookie(*m_stream);
 				}
 
 				m_webqq->m_clientid = generate_clientid();
@@ -204,9 +202,6 @@ public:
 			{
 				//polling group list
 				BOOST_ASIO_CORO_YIELD m_webqq->update_group_list(*this);
-
-				// 每 10 分钟修改一下在线状态.
-				lwqq_update_status(m_webqq, m_webqq->m_cookies.ptwebqq);
 
 				m_webqq->m_group_msg_insending = !m_webqq->m_msg_queue.empty();
 
@@ -282,7 +277,7 @@ private:
 
 		if (!ec){
 			m_webqq->m_status = LWQQ_STATUS_ONLINE;
-			save_cookie( &( m_webqq->m_cookies ), m_stream->response_options().header_string() );
+			m_webqq->m_cookie_mgr.set_cookie(*m_stream);
 			BOOST_LOG_TRIVIAL(info) <<  "login success!";
 		}else{
 			status = LWQQ_STATUS_OFFLINE;
@@ -290,29 +285,6 @@ private:
 		}
 
 		return status;
-	}
-
-	std::string buildcookie()
-	{
-		// 这里只需要
-
-		// RK pt2gguin ptcz ptiso ptui_loginuin ptwebqq skey uin verifysession
-
-		return boost::str(
-			boost::format(
-				"RK=%s; pt2gguin=%s; ptcz=%s; ptisp=%s; ptui_loginuin=%s; ptwebqq=%s; skey=%s; uin=%s; verifysession=%s; "
-			)
-			% m_webqq->m_cookies.RK
-			% m_webqq->m_cookies.pt2gguin
-			% m_webqq->m_cookies.ptcz
-			% m_webqq->m_cookies.ptisp
-			% m_webqq->m_qqnum
-			% m_webqq->m_cookies.ptwebqq
-			% m_webqq->m_cookies.skey
-			% m_webqq->m_cookies.uin
-			% m_webqq->m_cookies.verifysession
-		);
-
 	}
 
 private:

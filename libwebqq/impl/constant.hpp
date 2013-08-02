@@ -27,6 +27,9 @@
 #define VCCHECKPATH "/check"
 #define APPID "1003903"
 #define LWQQ_URL_SET_STATUS "http://d.web2.qq.com/channel/login2"
+
+#define LWQQ_URL_POLL_MESSAGE "http://d.web2.qq.com/channel/poll2"
+
 /* URL for get webqq version */
 #define LWQQ_URL_VERSION "http://ui.ptlogin2.qq.com/cgi-bin/ver"
 

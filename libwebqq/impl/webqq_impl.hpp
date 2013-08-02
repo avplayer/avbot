@@ -47,7 +47,7 @@ typedef boost::shared_ptr<avhttp::http_stream> read_streamptr;
 
 #include "../webqq.hpp"
 #include "../error_code.hpp"
-#include "lwqq_cookie.hpp"
+#include "cookie_mgr.hpp"
 
 #if !defined(_MSC_VER)
 #pragma GCC visibility push(hidden)
@@ -168,7 +168,6 @@ public:
 
 public:
 	std::string	m_vfwebqq;
-	LwqqCookies m_cookies;
 
 public:
 	boost::asio::io_service & m_io_service;
@@ -190,6 +189,8 @@ public:
 	bool		m_group_msg_insending;
 	boost::circular_buffer<boost::tuple<std::string, std::string, send_group_message_cb> >	m_msg_queue;
 	std::map<int, int> facemap;
+
+	cookie::cookie_store m_cookie_mgr;
 };
 
 };

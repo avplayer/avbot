@@ -103,7 +103,7 @@ struct process_group_message_op : boost::asio::coroutine
 						msg.cface.vfwebqq = m_webqq->m_vfwebqq;
 						msg.cface.key = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"key" ) );
 						msg.cface.server = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"server" ) );
-						msg.cface.cookie = m_webqq->m_cookies.lwcookies;
+						msg.cface.cookie = m_webqq->m_cookie_mgr.get_cookie("http://web.qq.com/cgi-bin/get_group_pic")() ;
 
 						BOOST_ASIO_CORO_YIELD
 							webqq::async_cface_url_final(m_webqq->get_ioservice(), msg.cface, *this );

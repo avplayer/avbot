@@ -45,10 +45,7 @@ namespace pt = boost::property_tree;
 #include "boost/consolestr.hpp"
 
 #include "webqq_impl.hpp"
-
 #include "constant.hpp"
-
-#include "lwqq_cookie.hpp"
 #include "lwqq_status.hpp"
 
 namespace webqq{
@@ -77,7 +74,7 @@ class update_group_list_op : boost::asio::coroutine
 		m_stream->request_options(
 			avhttp::request_opts()
 			(avhttp::http_options::request_method, "POST")
-			(avhttp::http_options::cookie, m_webqq->m_cookies.lwcookies)
+			(avhttp::http_options::cookie, m_webqq->m_cookie_mgr.get_cookie(url)())
 			(avhttp::http_options::referer, "http://s.web2.qq.com/proxy.html?v=20110412001&callback=1&id=1")
 			(avhttp::http_options::content_type, "application/x-www-form-urlencoded; charset=UTF-8")
 			(avhttp::http_options::request_body, postdata)

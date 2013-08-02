@@ -97,6 +97,7 @@ static pt::wptree json_parse( const wchar_t * doc )
 WebQQ::WebQQ( boost::asio::io_service& _io_service,
 		std::string _qqnum, std::string _passwd)
 : m_io_service( _io_service ), m_qqnum( _qqnum ), m_passwd( _passwd ), m_status( LWQQ_STATUS_OFFLINE ),
+	m_cookie_mgr("webqqcookies"), 
 	m_msg_queue( 20 ) //　最多保留最后的20条未发送消息.
 {
 #ifndef _WIN32
@@ -126,7 +127,6 @@ WebQQ::WebQQ( boost::asio::io_service& _io_service,
 /**login*/
 void WebQQ::check_login(webqq::webqq_handler_string_t handler)
 {
-	m_cookies.clear();
 	// start login process, will call login_withvc later
 	if (m_status == LWQQ_STATUS_OFFLINE)
 		detail::check_login_op op( shared_from_this(), handler );
@@ -188,7 +188,7 @@ void WebQQ::send_group_message_internal( std::string group, std::string msg, sen
 	stream->request_options(
 			avhttp::request_opts()
 			( avhttp::http_options::request_method, "POST" )
-			( avhttp::http_options::cookie, m_cookies.lwcookies )
+			( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(LWQQ_URL_SEND_QUN_MSG)() )
 			( avhttp::http_options::referer, "http://d.web2.qq.com/proxy.html?v=20101025002" )
 			( avhttp::http_options::content_type, "application/x-www-form-urlencoded; charset=UTF-8" )
 			( avhttp::http_options::request_body, postdata )
@@ -214,7 +214,6 @@ void WebQQ::cb_send_msg( const boost::system::error_code& ec, read_streamptr str
 		if( jstree.get<int>( "retcode" ) == 108 ) {
 			// 已经断线，重新登录
 			m_status = LWQQ_STATUS_OFFLINE;
-			m_cookies.clear();
 			// 10s 后登录.
 			boost::delayedcallsec( m_io_service, 10, m_funclogin );
 			m_group_msg_insending = false;
@@ -266,7 +265,7 @@ void WebQQ::update_group_member(boost::shared_ptr<qqGroup> group, webqq::webqq_h
 					  );
 	stream->request_options(
 		avhttp::request_opts()
-		( avhttp::http_options::cookie, m_cookies.lwcookies )
+		( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)() )
 		( avhttp::http_options::referer, LWQQ_URL_REFERER_QUN_DETAIL )
 		( avhttp::http_options::connection, "close" )
 	);
@@ -295,7 +294,7 @@ public:
 		stream->request_options(
 			avhttp::request_opts()
 			( avhttp::http_options::http_version , "HTTP/1.0" )
-			( avhttp::http_options::cookie, _webqq->m_cookies.lwcookies )
+			( avhttp::http_options::cookie, _webqq->m_cookie_mgr.get_cookie(url)() )
 			( avhttp::http_options::referer, "http://s.web2.qq.com/proxy.html?v=201304220930&callback=1&id=3" )
 			( avhttp::http_options::content_type, "UTF-8" )
 			( avhttp::http_options::connection, "close" )
@@ -417,7 +416,7 @@ void WebQQ::do_poll_one_msg( std::string ptwebqq )
 	read_streamptr pollstream( new avhttp::http_stream( m_io_service ) );
 	pollstream->request_options( avhttp::request_opts()
 								 ( avhttp::http_options::request_method, "POST" )
-								 ( avhttp::http_options::cookie, m_cookies.lwcookies )
+								 ( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(LWQQ_URL_POLL_MESSAGE)() )
 								 ( "cookie2", "$Version=1" )
 								 ( avhttp::http_options::referer, "http://d.web2.qq.com/proxy.html?v=20101025002" )
 								 ( avhttp::http_options::request_body, msg )
@@ -427,14 +426,14 @@ void WebQQ::do_poll_one_msg( std::string ptwebqq )
 							   );
 	boost::shared_ptr<boost::asio::streambuf> buffer = boost::make_shared<boost::asio::streambuf>();
 
-	avhttp::async_read_body( *pollstream, "http://d.web2.qq.com/channel/poll2", * buffer,
+	avhttp::async_read_body( *pollstream, LWQQ_URL_POLL_MESSAGE, * buffer,
 							boost::bind( &WebQQ::cb_poll_msg, this, _1, pollstream, buffer, ptwebqq )
 					   );
 }
 
 void WebQQ::cb_poll_msg( const boost::system::error_code& ec, read_streamptr stream, boost::shared_ptr<boost::asio::streambuf> buf, std::string ptwebqq)
 {
-	if( ptwebqq != m_cookies.ptwebqq ) {
+	if( ptwebqq != m_cookie_mgr.get_cookie(LWQQ_URL_POLL_MESSAGE).get_value("ptwebqq" ) ) {
 		BOOST_LOG_TRIVIAL(info) << "stoped polling messages" <<  std::endl;
 		return ;
 	}
@@ -497,27 +496,27 @@ void WebQQ::process_msg( const pt::wptree &jstree , std::string & ptwebqq )
 		if( retcode == 116)
 		{
 			// 更新 ptwebqq
-			ptwebqq = this->m_cookies.ptwebqq = wide_utf8( jstree.get<std::wstring>( L"p") );
-			m_cookies.update();
-			
+			ptwebqq = wide_utf8( jstree.get<std::wstring>( L"p") );
+			m_cookie_mgr.set_cookie("qq.com", "/", "ptwebqq", ptwebqq, "session");
+
 		}else if( retcode == 102 )
 		{
 			// 搞一个 GET 的长维护
+			std::string url = "http://webqq.qq.com/web2/get_msg_tip?uin=&tp=1&id=0&retype=1&rc=1&lv=3&t=1348458711542";
 			read_streamptr get_msg_tip( new avhttp::http_stream( m_io_service ) );
 			get_msg_tip->request_options( avhttp::request_opts()
-										  ( avhttp::http_options::cookie, m_cookies.lwcookies )
+										  ( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)() )
 										  ( avhttp::http_options::referer, "http://d.web2.qq.com/proxy.html?v=20101025002" )
 										  ( avhttp::http_options::connection, "close" )
 										);
 			boost::shared_ptr<boost::asio::streambuf> buffer = boost::make_shared<boost::asio::streambuf>();
 
-			avhttp::async_read_body( *get_msg_tip, "http://webqq.qq.com/web2/get_msg_tip?uin=&tp=1&id=0&retype=1&rc=1&lv=3&t=1348458711542",
+			avhttp::async_read_body( *get_msg_tip, url,
 								* buffer, boost::bind(&cb_get_msg_tip, _1, _2, get_msg_tip, buffer));
 		}
 		else
 		{
 			m_status = LWQQ_STATUS_OFFLINE;
-			m_cookies.clear();
 			boost::delayedcallsec( m_io_service, 15, m_funclogin );
 			js::write_json(std::wcerr, jstree);
 		}
@@ -559,7 +558,6 @@ void WebQQ::process_msg( const pt::wptree &jstree , std::string & ptwebqq )
 			//强制下线了，重登录.
 			if (m_status == LWQQ_STATUS_ONLINE){
 				m_status = LWQQ_STATUS_OFFLINE;
-				m_cookies.ptwebqq = "";
 				boost::delayedcallsec( m_io_service, 15, m_funclogin);
 			}
 		}
@@ -652,8 +650,7 @@ void WebQQ::cb_fetch_aid(const boost::system::error_code& ec, read_streamptr str
 	if (!ec)
 	{
 		// 获取到咯, 更新 verifysession
-		detail::update_cookies(&m_cookies, stream->response_options().header_string(), "verifysession");
-		m_cookies.update();
+		m_cookie_mgr.set_cookie(*stream);
 
 		handler(boost::system::error_code(), std::string(boost::asio::buffer_cast<const char*>(buf->data()), boost::asio::buffer_size(buf->data())));
 		return;
@@ -671,7 +668,7 @@ void WebQQ::fetch_aid(std::string arg, boost::function<void(const boost::system:
 	stream->request_options(
 		avhttp::request_opts()
 			(avhttp::http_options::referer, "http://web.qq.com/")
-			(avhttp::http_options::cookie, m_cookies.lwcookies)
+			(avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)())
 			(avhttp::http_options::connection, "close")
 	);
 
@@ -731,7 +728,7 @@ void WebQQ::search_group(std::string groupqqnum, std::string vfcode, webqq::sear
 	stream->request_options(avhttp::request_opts()
 		(avhttp::http_options::content_type, "utf-8")
 		(avhttp::http_options::referer, "http://cgi.web2.qq.com/proxy.html?v=201304220930&callback=1&id=2")
-		(avhttp::http_options::cookie, m_cookies.lwcookies)
+		(avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)())
 		(avhttp::http_options::connection, "close")
 	);
 
@@ -789,7 +786,10 @@ void WebQQ::join_group(qqGroup_ptr group, std::string vfcode, webqq::join_group_
 									"\"vfy\":\"%s\","
 									"\"msg\":\"avbot\","
 									"\"vfwebqq\":\"%s\"}" )
-								% group->code % vfcode % m_cookies.verifysession % m_vfwebqq
+								% group->code
+								% vfcode
+								% m_cookie_mgr.get_cookie(url).get_value("verifysession")
+								% m_vfwebqq
 							);
 
 	postdata = std::string("r=") + boost::url_encode(postdata);
@@ -799,7 +799,7 @@ void WebQQ::join_group(qqGroup_ptr group, std::string vfcode, webqq::join_group_
 		(avhttp::http_options::http_version, "HTTP/1.0")
 		(avhttp::http_options::content_type, "application/x-www-form-urlencoded; charset=UTF-8")
 		(avhttp::http_options::referer, "http://s.web2.qq.com/proxy.html?v=201304220930&callback=1&id=1")
-		(avhttp::http_options::cookie, m_cookies.lwcookies)
+		(avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)())
 		(avhttp::http_options::connection, "close")
 		(avhttp::http_options::request_method, "POST")
 		(avhttp::http_options::request_body, postdata)

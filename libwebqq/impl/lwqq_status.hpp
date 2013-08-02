@@ -48,7 +48,11 @@ public:
 		boost::property_tree::ptree r;
 		r.put("status", lwqq_status_to_str( LWQQ_STATUS_ONLINE ));
 		r.put("passwd_sig", "");
-		r.put("ptwebqq", m_webqq->m_cookies.ptwebqq);
+
+		cookie::cookie cookies =  m_webqq->m_cookie_mgr.get_cookie(LWQQ_URL_SET_STATUS);
+
+		r.put("ptwebqq", cookies.get_value("ptwebqq"));
+
 		r.put("clientid", m_webqq->m_clientid);
 		if (m_webqq->m_psessionid.empty())
 			r.put_child("psessionid", boost::property_tree::ptree());
@@ -68,7 +72,7 @@ public:
 		stream->request_options(
 			avhttp::request_opts()
 			( avhttp::http_options::request_method, "POST" )
-			( avhttp::http_options::cookie, m_webqq->m_cookies.lwcookies )
+			( avhttp::http_options::cookie, cookies() )
 			( avhttp::http_options::referer, "http://d.web2.qq.com/proxy.html?v=20110331002&callback=1&id=3" )
 			( avhttp::http_options::content_type, "application/x-www-form-urlencoded; charset=UTF-8" )
 			( avhttp::http_options::request_body, msg )
@@ -114,34 +118,6 @@ private:
 	read_streamptr stream;
 	boost::function<void (boost::system::error_code) > m_handler;
 	boost::shared_ptr<boost::asio::streambuf> buf;
-};
-
-// 用于更新在线状态, 每 10 分钟更新一下.
-class lwqq_update_status{
-public:
-	lwqq_update_status(boost::shared_ptr<qqimpl::WebQQ> webqq, std::string ptwebqq)
-		:m_webqq(webqq), m_ptwebqq(ptwebqq)
-	{
-		boost::delayedcallsec(m_webqq->get_ioservice(), 600, *this);
-	}
-
-	void operator()()
-	{
-		if(m_webqq->m_cookies.ptwebqq == m_ptwebqq)
-		{
-			lwqq_change_status(m_webqq, LWQQ_STATUS_ONLINE, *this);
-		}
-	}
-
-	void operator()(boost::system::error_code ec)
-	{
-		if(m_webqq->m_cookies.ptwebqq == m_ptwebqq)
-			boost::delayedcallsec(m_webqq->get_ioservice(), 600, *this);
-	}
-
-private:
-	boost::shared_ptr<qqimpl::WebQQ> m_webqq;
-	std::string m_ptwebqq;
 };
 
 }
