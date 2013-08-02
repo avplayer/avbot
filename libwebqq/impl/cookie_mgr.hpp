@@ -296,18 +296,44 @@ public:
 
 	static std::string build_domain_conditions(std::string domain)
 	{
-		bool prepend_or = false;
+		bool prepend_gama = false;
 		std::stringstream condition;
+
+		condition << "domain in (";
 		do{
-			if (prepend_or)
-				condition <<  " or " ;
-			condition <<  "domain = \"" << domain << "\" or domain = \"." <<  domain <<  "\" ";
-			prepend_or = true;
+			if (prepend_gama)
+				condition <<  " ,  " ;
+			condition <<  "\"" << domain << "\" , \"." <<  domain <<  "\" ";
+			prepend_gama = true;
 			if (domain.find_first_of('.')!= std::string::npos)
 			{
 				domain = domain.substr(domain.find_first_of('.')+1);
 			}
 		}while (domain.find_first_of('.') != std::string::npos );
+		condition << ")";
+		return condition.str();
+	}
+
+	static std::string build_path_conditions(std::string path)
+	{
+		bool prepend_gama = false;
+		std::stringstream condition;
+
+		// 砍掉 ?
+		std::size_t pos = path.find_first_of('?');
+		if (pos != std::string::npos){
+			path = path.substr(0, pos);
+		}
+
+		condition << "path in ( \"/\"";
+		do{
+			condition <<  ", \"" << path << "\"";
+			if (path.find_last_of('/')!= std::string::npos)
+			{
+				path = path.substr(0, path.find_last_of('/'));
+			}
+		}while (path.find_last_of('/') != std::string::npos );
+		condition << ")";
 		return condition.str();
 	}
 
@@ -324,7 +350,7 @@ public:
 		std::vector<soci::indicator> inds_names;
 		std::vector<soci::indicator> inds_values;
 
-		std::string sql = boost::str(boost::format("select name, value from cookies where %s") % build_domain_conditions(url.host()) );
+		std::string sql = boost::str(boost::format("select name, value from cookies where %s and %s") % build_domain_conditions(url.host()) % build_path_conditions(url.path()) );
 
 		db << sql , soci::into(names, inds_names), soci::into(values, inds_values) ;
 
