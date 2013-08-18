@@ -32,12 +32,12 @@ public:
 	{
 		std::fstream out(filename_.c_str(), std::fstream::out);
 
-		typedef typename std::map<
-				std::string,
-				boost::tuples::tuple<
-					std::size_t,
-					boost::posix_time::ptime
-				>
+		typedef std::map<
+			std::string,
+			boost::tuples::tuple<
+				std::size_t,
+				boost::posix_time::ptime
+			>
 		>::iterator iterator;
 
 		for (iterator iter = map_.begin(); iter != map_.end(); iter++)

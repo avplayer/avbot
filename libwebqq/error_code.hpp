@@ -81,6 +81,8 @@ enum errc_t
 
 	poll_failed_need_login, // 对于这个错误,  重新登录就可以了.
 
+	poll_failed_need_refresh, // 对于这个错误,  重新刷新群信息.
+
 	poll_failed_user_quit, // 对于这个错误,  重新登录就可以了.
 
 	poll_failed_unknow_ret_code, // 对于这个错误, 忽略？

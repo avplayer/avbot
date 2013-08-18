@@ -42,7 +42,7 @@ namespace js = boost::property_tree::json_parser;
 
 #include "constant.hpp"
 
-#include "lwqq_status.hpp"
+#include "webqq_status.hpp"
 
 namespace webqq {
 namespace qqimpl {
@@ -99,9 +99,10 @@ inline std::string generate_clientid()
 }
 
 // qq 登录办法-验证码登录
+template<class Handler>
 class SYMBOL_HIDDEN login_vc_op : boost::asio::coroutine{
 public:
-	login_vc_op(boost::shared_ptr<qqimpl::WebQQ> webqq, std::string _vccode, webqq::webqq_handler_t handler)
+	login_vc_op(boost::shared_ptr<qqimpl::WebQQ> webqq, std::string _vccode, Handler handler)
 		: m_webqq(webqq), vccode(_vccode), m_handler(handler)
 	{
 		std::string md5 = webqq_password_encode(m_webqq->m_passwd, vccode, m_webqq->m_verifycode.uin);
@@ -143,6 +144,8 @@ public:
 		{
 			if( ( check_login( ec, bytes_transfered ) == 0 ) && ( m_webqq->m_status == LWQQ_STATUS_ONLINE ) )
 			{
+				BOOST_LOG_TRIVIAL(info) <<  "redirecting to " << m_next_url;
+
 				// 再次　login
 				m_stream = boost::make_shared<avhttp::http_stream>(boost::ref(m_webqq->get_ioservice()));
 				m_stream->request_options(
@@ -177,12 +180,24 @@ public:
 					m_webqq->m_cookie_mgr.save_cookie(*m_stream);
 				}
 
-				m_webqq->m_clientid = generate_clientid();
+				BOOST_LOG_TRIVIAL(info) <<  "redirecting success!!";
+
+				if (m_webqq->m_clientid.empty())
+				{
+					m_webqq->m_clientid = generate_clientid();
+					m_webqq->m_cookie_mgr.save_cookie(
+						"psession.qq.com", "/", "clientid", m_webqq->m_clientid, "session"
+					);
+				}
 				//change status,  this is the last step for login
 				// 设定在线状态.
 
-				BOOST_ASIO_CORO_YIELD
-					m_webqq->change_status(LWQQ_STATUS_ONLINE, boost::bind<void>(*this, _1, 0));
+				BOOST_LOG_TRIVIAL(info) <<  "changing status...";
+
+				BOOST_ASIO_CORO_YIELD async_change_status(
+					m_webqq, LWQQ_STATUS_ONLINE,
+					boost::bind<void>(*this, _1, 0)
+				);
 
 				if(ec)
 				{
@@ -190,6 +205,8 @@ public:
 					m_webqq->get_ioservice().post(boost::asio::detail::bind_handler(m_handler, ec));
 					return;
 				}
+
+				BOOST_LOG_TRIVIAL(info) <<  "status => online";
 
 				i = 0;
 
@@ -306,7 +323,7 @@ private:
 
 private:
 	boost::shared_ptr<qqimpl::WebQQ> m_webqq;
-	webqq::webqq_handler_t m_handler;
+	Handler m_handler;
 	std::string m_next_url;
 
 	read_streamptr m_stream;
@@ -318,6 +335,20 @@ private:
 	grouplist::iterator iter;
 };
 
+template<class Handler>
+login_vc_op<Handler> make_async_login_vc_op(boost::shared_ptr<qqimpl::WebQQ> webqq, std::string _vccode, Handler handler)
+{
+	return login_vc_op<Handler>(webqq, _vccode, handler);
 }
+
+} // namespace detail
+
+
+template<class Handler>
+void async_login(boost::shared_ptr<qqimpl::WebQQ> webqq, std::string _vccode, Handler handler)
+{
+	detail::make_async_login_vc_op(webqq, _vccode, handler);
 }
-}
+
+} // namespace qqimpl
+} // namespace webqq

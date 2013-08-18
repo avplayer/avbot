@@ -341,21 +341,11 @@ void on_bot_command(avbot::av_message_tree jsonmessage, avbot & mybot)
 
 		if (groupptr)
 		{
-			webqq::qqBuddy * budyptr = groupptr->get_Buddy_by_uin(uin);
+			webqq::qqBuddy_ptr budyptr = groupptr->get_Buddy_by_uin(uin);
 
 			if (!budyptr)
 			{
-				webqq::qqBuddy budy;
-				budy.uin = uin;
-				budy.nick = nick;
-				groupptr->memberlist.insert(std::make_pair(uin, budy));
-			}
-			else
-			{
-				if (budyptr->nick.empty())
-				{
-					budyptr->nick = nick;
-				}
+				groupptr->add_new_buddy(uin, "", nick);
 			}
 		}
 

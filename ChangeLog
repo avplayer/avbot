@@ -1,4 +1,10 @@
-
+8.0
+	* 重启 avbot 不重新登录, 直到 cookie 失效才重登录
+	* irc 逻辑重写.
+	* 日志支持使用 http::/host:6276/search?channel=群号&q=搜索词&date= 进行搜索
+	* 支持 mingw64 编译
+	* 日志同时写入 qqlog 目录下的  avlog.db sqlite3数据库文件里.
+	* 使用 ircserver 配置 irc 服务器, 不再强制要求 freenode.net
 	* re-write RPC server, RPC now works
 	* print out backtrace when segfault(only on linux).
 	* fix endless loop that will run out your dechaptcha

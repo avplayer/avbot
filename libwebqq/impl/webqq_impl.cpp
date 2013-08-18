@@ -43,15 +43,17 @@ namespace js = boost::property_tree::json_parser;
 #include "constant.hpp"
 
 #include "utf8.hpp"
-#include "lwqq_status.hpp"
+#include "webqq_status.hpp"
 #include "clean_cache.hpp"
-#include "webqq_check_login.hpp"
-#include "webqq_login.hpp"
 #include "webqq_verify_image.hpp"
 #include "webqq_group_list.hpp"
 #include "webqq_group_qqnumber.hpp"
+#include "webqq_group_member.hpp"
 #include "webqq_poll_message.hpp"
+#include "webqq_keepalive.hpp"
 #include "group_message_sender.hpp"
+
+#include "webqq_loop.hpp"
 
 #ifdef WIN32
 
@@ -89,12 +91,16 @@ static pt::wptree json_parse( const wchar_t * doc )
 
 // build webqq and setup defaults
 WebQQ::WebQQ( boost::asio::io_service& _io_service,
-		std::string _qqnum, std::string _passwd)
-: m_io_service( _io_service ), m_qqnum( _qqnum ), m_passwd( _passwd ), m_status( LWQQ_STATUS_OFFLINE ),
-	m_cookie_mgr("webqqcookies"),
-	m_vc_queue(_io_service, 1),
-	m_group_message_queue(_io_service, 20), // 最多保留最后的20条未发送消息.
-	m_group_refresh_queue(_io_service)
+	std::string _qqnum, std::string _passwd, bool no_persistent_db)
+	: m_io_service( _io_service )
+	, m_qqnum( _qqnum )
+	, m_passwd( _passwd )
+	, m_status( LWQQ_STATUS_OFFLINE )
+	, m_cookie_mgr(no_persistent_db? ":memory:": "webqq_persistent")
+	, m_buddy_mgr(no_persistent_db? "buddy_cache": "webqq_persistent")
+	, m_vc_queue(_io_service, 1)
+	, m_group_message_queue(_io_service, 20) // 最多保留最后的20条未发送消息.
+	, m_group_refresh_queue(_io_service)
 {
 #ifndef _WIN32
 	/* Set msg_id */
@@ -110,135 +116,6 @@ WebQQ::WebQQ( boost::asio::io_service& _io_service,
 #endif
 
 	init_face_map();
-
-	if (!boost::filesystem::exists("cache"))
-		boost::filesystem::create_directories("cache");
-}
-
-/*
- * 这是 webqq 的一个内部循环，也是最重要的一个循环
- */
-class internal_loop_op : boost::asio::coroutine
-{
-public:
-	internal_loop_op(boost::asio::io_service & io_service, boost::shared_ptr<WebQQ> _webqq)
-	  : m_io_service(io_service), m_webqq(_webqq)
-	{
-		avloop_idle_post(m_io_service,
-			boost::asio::detail::bind_handler(*this,boost::system::error_code()));
-	}
-
-	void operator()(boost::system::error_code ec)
-	{
-		BOOST_ASIO_CORO_REENTER(this)
-		{for (;m_webqq->m_status!= LWQQ_STATUS_QUITTING;){
-			do{
-				// try check_login
-				BOOST_ASIO_CORO_YIELD
-					detail::check_login( m_webqq,*this );
-				if (ec){
-					BOOST_LOG_TRIVIAL(error) << "发生错误: " <<  ec.message() <<  " 重试中...";
-					BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
-						m_io_service, 300, boost::asio::detail::bind_handler(*this,ec));
-				}
-			}while (ec);
-
-			// then retrive vc, can be pushed by check_login or login_withvc
-			BOOST_ASIO_CORO_YIELD m_webqq->m_vc_queue.async_pop(*this);
-			// 注意，下一行其实回调已经完成登录了.
-
-			if (ec)
-			{
-				if (ec == error::login_failed_wrong_vc)
-				{
-					m_webqq->m_sigbadvc();
-				}
-				// 查找问题， 报告问题啊！
-				if (ec == error::login_failed_wrong_passwd)
-				{
-					// 密码问题,  直接退出了.
-					BOOST_LOG_TRIVIAL(error) << ec.message();
-					BOOST_LOG_TRIVIAL(error) << "停止登录, 请修改密码重启 avbot";
-					m_webqq->m_status = LWQQ_STATUS_QUITTING;
-					return;
-				}
-				if (ec == error::login_failed_blocked_account)
-				{
-					BOOST_LOG_TRIVIAL(error) << "300s 后重试...";
-					// 帐号冻结, 多等些时间, 嘻嘻
-					BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
-						m_io_service, 300, boost::asio::detail::bind_handler(*this,ec));
-				}
-
-				BOOST_LOG_TRIVIAL(error) << "30s 后重试...";
-
-				BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
-						m_io_service, 30, boost::asio::detail::bind_handler(*this,ec));
-			}
-
-			// 进入 message 循环.
-			while (m_webqq->m_status == LWQQ_STATUS_ONLINE)
-			{
-				// TODO, 每 12个小时刷新群列表.
-
-				// 获取一次消息。
-				BOOST_ASIO_CORO_YIELD m_webqq->async_poll_message(*this);
-
-				// 判断消息处理结果
-
-				if (ec == error::poll_failed_need_login || ec == error::poll_failed_user_kicked_off)
-				{
-					// 重新登录
-
-					// 延时 60s
-					BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
-						m_io_service, 60, boost::asio::detail::bind_handler(*this,ec));
-
-					m_webqq->m_status = LWQQ_STATUS_OFFLINE;
-				}else if ( ec == error::poll_failed_network_error )
-				{
-					// 等待等待就好了，等待 12s
-					BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
-						m_io_service, 12, boost::asio::detail::bind_handler(*this,ec));
-				}
-			}
-
-			// 掉线了，自动重新进入循环， for (;;) 嘛
-		}}
-	}
-
-	// check_login 回调到这里
-	void operator()(boost::system::error_code ec, std::string vc)
-	{
-		if (ec)
-		{
-			if (ec == error::login_check_need_vc)
-			{
-				m_webqq->m_signeedvc(vc);
-				ec = boost::system::error_code();
-			}
-		}else{
-			m_webqq->m_vc_queue.push(vc);
-		}
-		// 回到上面。
-		m_io_service.post(boost::asio::detail::bind_handler(*this, ec));
-	}
-
-	void operator()(std::string v)
-	{
-		BOOST_LOG_TRIVIAL(info) << "vc code is \"" << v << "\"" ;
-		// 回调会进入 async_pop 的下一行
-		detail::login_vc_op op( m_webqq, v, *this);
-	}
-
-private:
-	boost::asio::io_service & m_io_service;
-	boost::shared_ptr<WebQQ> m_webqq;
-};
-
-static internal_loop_op internal_loop(boost::asio::io_service & io_service, boost::shared_ptr<WebQQ> _webqq)
-{
-	return internal_loop_op(io_service, _webqq);
 }
 
 class group_auto_refresh_op : boost::asio::coroutine
@@ -248,41 +125,40 @@ public:
 		:m_webqq(_webqq)
 	{
 		m_webqq->m_group_refresh_queue.async_pop(
-			boost::bind<void>(*this, boost::system::error_code(), _1)
+			boost::bind<void>(*this, _1, _2)
 		);
 
-		m_last_sync = boost::posix_time::from_time_t(std::time(NULL));
+		m_last_sync = boost::posix_time::from_time_t(0);
 	}
 
 	// pop call back
 	void operator()(boost::system::error_code ec, WebQQ::group_refresh_queue_type v)
 	{
-		int type;
+		std::string gid;
 		// 检查最后一次同步时间.
 		boost::posix_time::ptime curtime = boost::posix_time::from_time_t(std::time(NULL));
 
 		BOOST_ASIO_CORO_REENTER(this)
 		{for (;m_webqq->m_status!= LWQQ_STATUS_QUITTING;){
 
-			if (boost::posix_time::time_duration(curtime - m_last_sync).minutes() <= 30)
-			{
-				// 需要最少休眠 30min 才能再次发起一次，否则会被 TX 拉黑
-
-				BOOST_ASIO_CORO_YIELD
-					boost::delayedcallsec(m_webqq->get_ioservice(),
-						boost::posix_time::time_duration(curtime - m_last_sync).seconds(),
-						boost::asio::detail::bind_handler(*this, ec, v)
-					);
-			}
-
 			// good, 现在可以更新了.
 
 			// 先检查 type
-			type = v.get<1>();
+			gid = v.get<1>();
 
 
-			if (type == 0) // 更新全部.
+			if (gid.empty()) // 更新全部.
 			{
+				// 需要最少休眠 30min 才能再次发起一次，否则会被 TX 拉黑
+				if (boost::posix_time::time_duration(curtime - m_last_sync).minutes() <= 30)
+				{
+					BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
+						m_webqq->get_ioservice(),
+						1800 - boost::posix_time::time_duration(curtime - m_last_sync).seconds(),
+						boost::asio::detail::bind_handler(*this, ec, v)
+					);
+				}
+
 				BOOST_ASIO_CORO_YIELD m_webqq->update_group_list(
 					boost::bind<void>(*this, _1, v)
 				);
@@ -294,49 +170,48 @@ public:
 				}
 				else
 				{
-					// 检查是否刷新了群 GID, 如果是，就要刷新群列表！
-					if ( ! m_webqq->m_groups.empty() &&
-						! m_webqq->m_groups.begin()->second->memberlist.empty())
-					{
-						// 刷新群列表！
-						// 接着是刷新群成员列表.
-						for (iter = m_webqq->m_groups.begin(); iter != m_webqq->m_groups.end(); ++iter)
-						{
-							BOOST_ASIO_CORO_YIELD
-								m_webqq->update_group_member(iter->second , boost::bind<void>(*this, _1, v));
-
-							using namespace boost::asio::detail;
-							BOOST_ASIO_CORO_YIELD
-								boost::delayedcallms(m_webqq->get_ioservice(), 530, bind_handler(*this, ec, v));
-						}
-					}
+// 					// 检查是否刷新了群 GID, 如果是，就要刷新群列表！
+// 					if ( ! m_webqq->m_groups.empty() &&
+// 						! m_webqq->m_groups.begin()->second->memberlist.empty())
+// 					{
+// 						// 刷新群列表！
+// 						// 接着是刷新群成员列表.
+// 						for (iter = m_webqq->m_groups.begin(); iter != m_webqq->m_groups.end(); ++iter)
+// 						{
+// 							BOOST_ASIO_CORO_YIELD
+// 								m_webqq->update_group_member(iter->second , boost::bind<void>(*this, _1, v));
+//
+// 							using namespace boost::asio::detail;
+// 							BOOST_ASIO_CORO_YIELD
+// 								boost::delayedcallms(m_webqq->get_ioservice(), 530, bind_handler(*this, ec, v));
+// 						}
+// 					}
 				}
 			}
-			else if (type == 1)
+			else
 			{
-				if (m_webqq->get_Group_by_gid(v.get<2>()))
-				{
-					// 更新特定的 group 即可！
-					BOOST_ASIO_CORO_YIELD m_webqq->update_group_member(
-								m_webqq->get_Group_by_gid(v.get<2>()),
-								boost::bind<void>(*this, _1, v)
+				// 更新特定的 group 即可！
+				BOOST_ASIO_CORO_YIELD qqimpl::update_group_member(
+					m_webqq,
+					m_webqq->m_buddy_mgr.get_group_by_gid(gid),
+					boost::bind<void>(*this, _1, v)
+				);
+
+				if (ec){
+					// 应该是群GID都变了，重新刷新
+					m_webqq->m_group_refresh_queue.push(
+						boost::make_tuple(
+							webqq::webqq_handler_t(),
+							std::string()
+						)
 					);
-					if (ec){
-						// 应该是群GID都变了，重新刷新
-						m_webqq->m_group_refresh_queue.push(
-							boost::make_tuple(
-								webqq::webqq_handler_t(),
-								0,
-								std::string(),
-								std::string()
-							)
-						);
-					}
 				}
+
 			}
 
 			// 更新完毕
-			if (v.get<0>()){
+			if (v.get<0>())
+			{
 				v.get<0>()(ec);
 			}
 
@@ -344,7 +219,7 @@ public:
 
 			// 继续获取，嘻嘻.
 			BOOST_ASIO_CORO_YIELD m_webqq->m_group_refresh_queue.async_pop(
-				boost::bind<void>(*this, ec, _1)
+				boost::bind<void>(*this, _1, _2)
 			);
 		}}
 	}
@@ -361,35 +236,24 @@ static group_auto_refresh_op group_auto_refresh(boost::shared_ptr<WebQQ> _webqq)
 	return group_auto_refresh_op(_webqq);
 }
 
-void WebQQ::start_schedule_work()
+void WebQQ::start()
 {
-	internal_loop(get_ioservice(), shared_from_this());
+	start_internal_loop(get_ioservice(), shared_from_this());
 
 	group_message_sender(shared_from_this());
 
 	group_auto_refresh(shared_from_this());
-/*
-				// 搞一个 GET 的长维护
-			std::string url = "http://webqq.qq.com/web2/get_msg_tip?uin=&tp=1&id=0&retype=1&rc=1&lv=3&t=1348458711542";
-			read_streamptr get_msg_tip( new avhttp::http_stream( m_io_service ) );
-			get_msg_tip->request_options( avhttp::request_opts()
-										  ( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)() )
-										  ( avhttp::http_options::referer, "http://d.web2.qq.com/proxy.html?v=20101025002" )
-										  ( avhttp::http_options::connection, "close" )
-										);
-			boost::shared_ptr<boost::asio::streambuf> buffer = boost::make_shared<boost::asio::streambuf>();
-
-			avhttp::async_read_body( *get_msg_tip, url,
-								* buffer, boost::bind(&cb_get_msg_tip, _1, _2, get_msg_tip, buffer));*/
-
 
 	// 开启个程序去清理过期 cache_* 文件
 	// webqq 每天登录 uid 变化,  而不是每次都变化.
 	// 所以 cache 有效期只有一天.
-	clean_cache(get_ioservice());
+	if (boost::filesystem::exists("cache"))
+		start_clean_cache(shared_from_this());
+
+	webqq_keepalive(shared_from_this());
 }
 
-void WebQQ::stop_schedule_work()
+void WebQQ::stop()
 {
 	m_group_message_queue.cancele();
 	m_group_refresh_queue.cancele();
@@ -400,7 +264,7 @@ void WebQQ::stop_schedule_work()
 // and this will be callded every other minutes to prevent foce kick off.
 void  WebQQ::change_status(LWQQ_STATUS status, boost::function<void (boost::system::error_code) > handler)
 {
-	detail::lwqq_change_status op(shared_from_this(), status, handler);
+	async_change_status(shared_from_this(), status, handler);
 }
 
 void WebQQ::async_poll_message(webqq::webqq_handler_t handler)
@@ -432,27 +296,9 @@ void WebQQ::update_group_qqnumber(boost::shared_ptr<qqGroup> group, webqq::webqq
 
 void WebQQ::update_group_member(boost::shared_ptr<qqGroup> group, webqq::webqq_handler_t handler)
 {
-	read_streamptr stream( new avhttp::http_stream( m_io_service ) );
-
-	std::string url = boost::str(
-						  boost::format( "%s/api/get_group_info_ext2?gcode=%s&vfwebqq=%s&t=%ld" )
-						  % "http://s.web2.qq.com"
-						  % group->code
-						  % m_vfwebqq
-						  % std::time( NULL )
-					  );
-	stream->request_options(
-		avhttp::request_opts()
-		( avhttp::http_options::cookie, m_cookie_mgr.get_cookie(url)() )
-		( avhttp::http_options::referer, LWQQ_URL_REFERER_QUN_DETAIL )
-		( avhttp::http_options::connection, "close" )
+	m_group_refresh_queue.push(
+		boost::make_tuple(handler, group->gid)
 	);
-
-	boost::shared_ptr<boost::asio::streambuf> buffer = boost::make_shared<boost::asio::streambuf>();
-
-	avhttp::async_read_body( *stream, url, * buffer,
-						 boost::bind( &WebQQ::cb_group_member, this, _1, stream, buffer, group, handler)
-					   );
 }
 
 class SYMBOL_HIDDEN buddy_uin_to_qqnumber {
@@ -520,7 +366,11 @@ public:
 	update_group_member_qq_op( boost::shared_ptr<WebQQ>  _webqq, boost::shared_ptr<qqGroup> _group )
 		: group( _group ), m_webqq( _webqq )
 	{
-		m_webqq->get_ioservice().post( boost::asio::detail::bind_handler(*this, std::string()));
+		m_uins = m_webqq->m_buddy_mgr.get_group_all_buddies_uin(_group->gid);
+
+		m_webqq->get_ioservice().post(
+			boost::asio::detail::bind_handler(*this, std::string())
+		);
 	}
 
 	void operator()( std::string qqnum )
@@ -528,21 +378,26 @@ public:
 		//我说了是一个一个的更新对吧，可不能一次发起　N 个连接同时更新，会被TX拉黑名单的.
 		reenter( this )
 		{
-			for( it = group->memberlist.begin(); it != group->memberlist.end(); it++ ) {
-				if (it->second.qqnum.empty())
+			for( i = 0 ; i < m_uins.size() ; i++ )
+			{
+				if (!m_webqq->m_buddy_mgr.buddy_has_qqnum(m_uins[i]))
 				{
-					yield buddy_uin_to_qqnumber( m_webqq, it->second.uin, *this );
+					yield buddy_uin_to_qqnumber( m_webqq, m_uins[i], *this );
 					if ( qqnum == "-1")
-					return;
+						return;
+					else
+						m_webqq->m_buddy_mgr.map_buddy_qqnum(m_uins[i], qqnum);
 				}
-				it->second.qqnum = qqnum;
 			}
 		}
 	}
 private:
-	std::map< std::string, qqBuddy >::iterator it;
 	boost::shared_ptr<qqGroup> group;
 	boost::shared_ptr<WebQQ> m_webqq;
+
+	std::vector<std::string> m_uins;
+
+	int i;
 };
 
 //　将组成员的 QQ 号码一个一个更新过来.
@@ -553,24 +408,12 @@ void WebQQ::update_group_member_qq(boost::shared_ptr<qqGroup> group )
 
 qqGroup_ptr WebQQ::get_Group_by_gid( std::string gid )
 {
-	grouplist::iterator it = m_groups.find( gid );
-
-	if( it != m_groups.end() )
-		return it->second;
-
-	return qqGroup_ptr();
+	return m_buddy_mgr.get_group_by_gid(gid);
 }
 
 qqGroup_ptr WebQQ::get_Group_by_qq( std::string qq )
 {
-	grouplist::iterator it = m_groups.begin();
-
-	for( ; it != m_groups.end(); it ++ ) {
-		if( it->second->qqnum == qq )
-			return it->second;
-	}
-
-	return qqGroup_ptr();
+	return m_buddy_mgr.get_group_by_qq(qq);
 }
 
 void WebQQ::get_verify_image( std::string vcimgid, webqq::webqq_handler_string_t handler)
@@ -585,79 +428,6 @@ void WebQQ::cb_newbee_group_join( qqGroup_ptr group,  std::string uid )
 	boost::delayedcallsec(get_ioservice(), 30,
 		boost::bind(boost::ref(signewbuddy), group, group->get_Buddy_by_uin(uid))
 	);
-}
-
-void WebQQ::cb_group_member_process_json(pt::ptree &jsonobj, boost::shared_ptr<qqGroup> group)
-{
-	//TODO, group members
-	if( jsonobj.get<int>( "retcode" ) == 0 ) {
-		group->owner = jsonobj.get<std::string>( "result.ginfo.owner" );
-
-		BOOST_FOREACH( pt::ptree::value_type & v, jsonobj.get_child( "result.minfo" ) ) {
-			qqBuddy buddy;
-			pt::ptree & minfo = v.second;
-			buddy.nick = minfo.get<std::string>( "nick" );
-			buddy.uin = minfo.get<std::string>( "uin" );
-
-			group->memberlist.insert( std::make_pair( buddy.uin, buddy ) );
-		}
-
-		BOOST_FOREACH( pt::ptree::value_type & v, jsonobj.get_child( "result.ginfo.members" ) ) {
-			pt::ptree & minfo = v.second;
-			std::string muin = minfo.get<std::string>( "muin" );
-			std::string mflag = minfo.get<std::string>( "mflag" );
-
-			try {
-				group->get_Buddy_by_uin( muin )->mflag = boost::lexical_cast<unsigned int>( mflag );
-			} catch( boost::bad_lexical_cast & e ) {}
-		}
-		try {
-			BOOST_FOREACH( pt::ptree::value_type & v, jsonobj.get_child( "result.cards" ) )
-			{
-				pt::ptree & minfo = v.second;
-				std::string muin = minfo.get<std::string>( "muin" );
-				std::string card = minfo.get<std::string>( "card" );
-				group->get_Buddy_by_uin( muin )->card = card;
-			}
-		} catch( const pt::ptree_bad_path & badpath ) {
-		}
-	}
-}
-
-
-void WebQQ::cb_group_member( const boost::system::error_code& ec, read_streamptr stream, boost::shared_ptr<boost::asio::streambuf> buffer, boost::shared_ptr<qqGroup> group, webqq::webqq_handler_t handler)
-{
-	//处理!
-	try {
-
-		pt::ptree jsonobj;
-		std::istream jsondata( buffer.get() );
-
-		pt::json_parser::read_json( jsondata, jsonobj );
-
-		cb_group_member_process_json(jsonobj, group);
-
-		pt::json_parser::write_json( std::string("cache/group_") + console_out_str(group->name) , jsonobj );
-
-		// 开始更新成员的 QQ 号码，一次更新一个，慢慢来.
-		this->update_group_member_qq( group );
-
-		get_ioservice().post(boost::asio::detail::bind_handler(handler, boost::system::error_code()));
-
-	} catch( const pt::json_parser_error & jserr ) {
-		BOOST_LOG_TRIVIAL(error) <<  __FILE__ << " : " << __LINE__ << " : " <<  "parse json error : " <<  jserr.what();
-
-		// 在重试之前，获取缓存文件.
-		try{
-			pt::ptree jsonobj;
-			pt::json_parser::read_json(std::string("cache/group_") + group->name , jsonobj);
-			cb_group_member_process_json(jsonobj, group);
-			get_ioservice().post(boost::asio::detail::bind_handler(handler, boost::system::error_code()));
-		}catch (...){
-			boost::delayedcallsec( m_io_service, 20, boost::bind( &WebQQ::update_group_member, shared_from_this(), group, handler) );
-		}
-	} catch( const pt::ptree_bad_path & badpath ) {
-	}
 }
 
 void WebQQ::cb_fetch_aid(const boost::system::error_code& ec, read_streamptr stream,  boost::shared_ptr<boost::asio::streambuf> buf, boost::function<void(const boost::system::error_code&, std::string)> handler)

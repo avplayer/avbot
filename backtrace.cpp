@@ -11,8 +11,8 @@ static void avbot_seg_handler(int sig_num, siginfo_t * info, void * ucontext)
 {
 	ucontext_t * uc = (ucontext_t *)ucontext;
 
-	void * array[500];
-	int size = backtrace(array, 500);
+	void * array[50];
+	int size = backtrace(array, 50);
 
 	void * caller_address = (void *)(array[2]);
 
@@ -95,4 +95,5 @@ extern "C" void avbot_setup_seghandler()
 	handler.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
 	handler.sa_sigaction =  avbot_seg_handler ;
 	sigaction(SIGSEGV, &handler, NULL);   // install our handler
+	sigaction(SIGABRT, &handler, NULL);   // install our handler
 }

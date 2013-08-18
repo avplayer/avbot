@@ -10,57 +10,98 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/timedcall.hpp>
 
-namespace webqq{
-namespace detail
-{
+#include "webqq_impl.hpp"
 
-void clean_cache_dir_walk_handler( boost::asio::io_service & io_service, const boost::filesystem::path & item, boost::async_dir_walk_continue_handler handler )
-{
-	using namespace boost::system;
+namespace webqq {
+namespace qqimpl {
+namespace detail {
 
-	//boost::function<void(const boost::system::error_code&)> h = io_service.wrap(handler);
-	if( boost::filesystem::is_regular_file( item ) )
+class clean_cache_op : boost::asio::coroutine
+{
+public:
+	clean_cache_op(boost::shared_ptr<WebQQ> webqq)
+		: m_webqq(webqq)
 	{
-		boost::regex ex( "group_.*" );
-		boost::cmatch what;
-
-		std::string filename  =  boost::filesystem::basename( item );
-
-		if( boost::regex_match( filename.c_str(), what, ex ) )
-		{
-			boost::posix_time::ptime now = boost::posix_time::from_time_t( std::time( 0 ) );
-
-			// 执行 glob 匹配,  寻找 cache_*
-			// 删除最后访问时间超过一天的文件.
-
-			boost::posix_time::ptime last_write_time
-				= boost::posix_time::from_time_t( boost::filesystem::last_write_time( item ) );
-
-			if( (now.date() - last_write_time.date()).days() > 0 )
-			{
-				// TODO! 应该集中到一个地方一起 remove ! 对吧!
-				boost::filesystem::remove( item );
-			}
-		}
+		boost::async_dir_walk(
+			m_webqq->get_ioservice(),
+			boost::filesystem::path("cache"),
+			*this,
+			*this
+		);
 	}
 
-	handler( error_code() );
-}
+	template<class DirWalkContinueHandler>
+	void operator()(const boost::filesystem::path& item, DirWalkContinueHandler handler)
+	{
+		// 回调在这里,  一次清理一个.
+		using namespace boost::system;
 
-}
+		//boost::function<void(const boost::system::error_code&)> h = io_service.wrap(handler);
+		if (boost::filesystem::is_regular_file(item))
+		{
+			boost::regex ex("group_.*");
+			boost::cmatch what;
 
-inline void clean_cache( boost::asio::io_service &io_service);
-inline void clean_cache( boost::asio::io_service &io_service, boost::system::error_code ec)
+			std::string filename  =  boost::filesystem::basename(item);
+
+			if (boost::regex_match(filename.c_str(), what, ex))
+			{
+				boost::posix_time::ptime now = boost::posix_time::from_time_t(std::time(0));
+
+				// 执行 glob 匹配,  寻找 cache_*
+				// 删除最后访问时间超过一天的文件.
+
+				boost::posix_time::ptime last_write_time
+					= boost::posix_time::from_time_t(boost::filesystem::last_write_time(item));
+
+				if ((now.date() - last_write_time.date()).days() > 0)
+				{
+					// TODO! 应该集中到一个地方一起 remove ! 对吧!
+					boost::filesystem::remove(item);
+				}
+			}
+		}
+
+		m_webqq->get_ioservice().post(
+			boost::bind<void>(handler, error_code())
+		);
+	}
+
+	void operator()(boost::system::error_code ec)
+	{
+		BOOST_ASIO_CORO_REENTER(this)
+		{for (;m_webqq->m_status!= LWQQ_STATUS_QUITTING;){
+			// 清理完成!
+			BOOST_ASIO_CORO_YIELD boost::delayedcallsec(
+				m_webqq->get_ioservice(), 4000,
+				boost::bind<void>(*this, ec)
+			);
+
+			// 重启清理协程.
+			BOOST_ASIO_CORO_YIELD boost::async_dir_walk(
+				m_webqq->get_ioservice(),
+				boost::filesystem::path("cache"),
+				*this,
+				*this
+			);
+		}}
+	}
+private:
+	boost::shared_ptr<WebQQ> m_webqq;
+};
+
+clean_cache_op make_clean_cache_op(boost::shared_ptr<WebQQ> webqq)
 {
-	boost::delayedcallsec(io_service, 4000, boost::bind( &clean_cache, boost::ref( io_service )));
+	return clean_cache_op(webqq);
 }
 
-inline void clean_cache( boost::asio::io_service &io_service)
+} // namespace detail
+
+
+inline void start_clean_cache(boost::shared_ptr<WebQQ> webqq)
 {
-	boost::async_dir_walk( io_service, boost::filesystem::path( "cache" ),
-							boost::bind( detail::clean_cache_dir_walk_handler, boost::ref( io_service ), _1, _2 ),
-							boost::bind( &clean_cache, boost::ref( io_service ), _1)
-						 );
+	detail::make_clean_cache_op(webqq);
 }
 
+} // namespace qqimpl
 } // namespace webqq

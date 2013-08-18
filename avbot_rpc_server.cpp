@@ -17,9 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  */
-
 #include <boost/json_create_escapes_utf8.hpp>
-
+#include <boost/function.hpp>
 #include <boost/asio.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -90,14 +89,38 @@ void avbot_rpc_server::get_response_sended(boost::shared_ptr< boost::asio::strea
 }
 
 // 发送数据在这里
-void avbot_rpc_server::on_pop(boost::shared_ptr< boost::asio::streambuf > v)
+void avbot_rpc_server::on_pop(boost::shared_ptr<boost::asio::streambuf> v)
 {
 	avhttpd::response_opts opts;
 	opts.insert(avhttpd::http_options::content_type, "application/json; charset=utf8");
 	opts.insert(avhttpd::http_options::content_length, boost::lexical_cast<std::string>(v->size()));
 	opts.insert("Cache-Control", "no-cache");
 	opts.insert(avhttpd::http_options::connection, "keep-alive");
-	opts.insert(avhttpd::http_options::http_version, m_request.find(avhttpd::http_options::http_version));
+	opts.insert(avhttpd::http_options::http_version,
+		m_request.find(avhttpd::http_options::http_version)
+	);
+
+	avhttpd::async_write_response(
+		*m_socket, 200, opts, *v,
+		boost::bind<void>(&avbot_rpc_server::get_response_sended, shared_from_this(), v,  _1, _2)
+	);
+}
+
+void avbot_rpc_server::done_search(boost::system::error_code ec, boost::property_tree::ptree jsonout)
+{
+	boost::shared_ptr<boost::asio::streambuf> v = boost::make_shared<boost::asio::streambuf>();
+	std::ostream outstream(v.get());
+	boost::property_tree::json_parser::write_json(outstream, jsonout);
+
+	avhttpd::response_opts opts;
+	opts.insert(avhttpd::http_options::content_type, "application/json; charset=utf8");
+	opts.insert(avhttpd::http_options::content_length, boost::lexical_cast<std::string>(v->size()));
+	opts.insert("Cache-Control", "no-cache");
+	opts.insert(avhttpd::http_options::connection, "keep-alive");
+	opts.insert(avhttpd::http_options::http_version,
+		m_request.find(avhttpd::http_options::http_version)
+	);
+
 
 	avhttpd::async_write_response(
 		*m_socket, 200, opts, *v,
@@ -108,6 +131,7 @@ void avbot_rpc_server::on_pop(boost::shared_ptr< boost::asio::streambuf > v)
 // 数据操作跑这里，嘻嘻.
 void avbot_rpc_server::client_loop(boost::system::error_code ec, std::size_t bytestransfered)
 {
+	boost::smatch what;
 	//for (;;)
 	reenter(this)
 	{for (;;){
@@ -143,29 +167,85 @@ void avbot_rpc_server::client_loop(boost::system::error_code ec, std::size_t byt
 		// 解析 HTTP
 		if(m_request.find(avhttpd::http_options::request_method) == "GET" )
 		{
-			// 等待消息, 并发送.
-			yield m_responses.async_pop(boost::bind(&avbot_rpc_server::on_pop, shared_from_this(), _1));
+			if(m_request.find(avhttpd::http_options::request_uri)=="/message")
+			{
+				// 等待消息, 并发送.
+				yield m_responses.async_pop(
+					boost::bind(&avbot_rpc_server::on_pop, shared_from_this(), _2)
+				);
+			}
+			else if(
+				boost::regex_match(
+					m_request.find(avhttpd::http_options::request_uri),
+					what,
+					boost::regex("/search\\?channel=([^&]*)&q=([^&]*)&date=([^&]*).*")
+				)
+			)
+			{
+				// 取出这几个参数, 到数据库里查找, 返回结果吧.
+				yield do_search(what[1],what[2],what[3],
+					boost::bind(&avbot_rpc_server::done_search, shared_from_this(), _1, _2)
+				);
+				return;
+			}
+			else if(
+				boost::regex_match(
+					m_request.find(avhttpd::http_options::request_uri),
+					what,
+					boost::regex("/search(\\?)?")
+				)
+			)
+			{
+				// missing parameter
+				yield avhttpd::async_write_response(
+					*m_socket,
+					avhttpd::errc::internal_server_error,
+					boost::bind(
+						&avbot_rpc_server::client_loop,
+						shared_from_this(),
+						_1, 0
+					)
+				);
+				return;
+			}
+			else
+			{
+				yield avhttpd::async_write_response(
+					*m_socket,
+					avhttpd::errc::not_found,
+					boost::bind(
+						&avbot_rpc_server::client_loop,
+						shared_from_this(),
+						_1, 0
+					)
+				);
+				return;
+			}
 		}
 		else if( m_request.find(avhttpd::http_options::request_method) == "POST")
 		{
 			// 这里进入 POST 处理.
 			// 读取 body
 			yield boost::asio::async_read(
-				*m_socket, *m_streambuf,
+				*m_socket,
+				*m_streambuf,
 				boost::asio::transfer_exactly(
-					boost::lexical_cast<std::size_t>(m_request.find(avhttpd::http_options::content_length))
-						- m_streambuf->size()
+					boost::lexical_cast<std::size_t>(
+						m_request.find(avhttpd::http_options::content_length)
+					) - m_streambuf->size()
 				),
-
 				boost::bind(&avbot_rpc_server::client_loop, shared_from_this(), _1, _2 )
 			);
 			// body 必须是合法有效的 JSON 格式
-			yield avhttpd::async_write_response(*m_socket, process_post(m_streambuf->size()),
+			yield avhttpd::async_write_response(
+					*m_socket,
+					process_post(m_streambuf->size()),
 					avhttpd::response_opts()
 						(avhttpd::http_options::content_length, "4")
 						(avhttpd::http_options::content_type, "text/plain")
 						("Cache-Control", "no-cache")
-						(avhttpd::http_options::http_version, m_request.find(avhttpd::http_options::http_version)),
+						(avhttpd::http_options::http_version,
+							m_request.find(avhttpd::http_options::http_version)),
 					boost::asio::buffer("done"),
 					boost::bind(&avbot_rpc_server::client_loop, shared_from_this(), _1, 0)
 			);
@@ -183,8 +263,8 @@ void avbot_rpc_server::client_loop(boost::system::error_code ec, std::size_t byt
 void avbot_rpc_server::callback_message(const boost::property_tree::ptree& jsonmessage)
 {
 	boost::shared_ptr<boost::asio::streambuf> buf(new boost::asio::streambuf);
-	std::ostream	stream(buf.get());
-	std::stringstream	teststream;
+	std::ostream stream(buf.get());
+	std::stringstream teststream;
 
 	js::write_json(stream, jsonmessage);
 

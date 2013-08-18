@@ -32,15 +32,15 @@ namespace fs = boost::filesystem;
 
 namespace webqq{
 
-webqq::webqq( boost::asio::io_service& asio_service, std::string qqnum, std::string passwd)
+webqq::webqq( boost::asio::io_service& asio_service, std::string qqnum, std::string passwd, bool no_persistent_db)
 {
-	impl = boost::make_shared<qqimpl::WebQQ>( boost::ref(asio_service), qqnum, passwd);
-	impl->start_schedule_work();
+	impl = boost::make_shared<qqimpl::WebQQ>(boost::ref(asio_service), qqnum, passwd, no_persistent_db);
+	impl->start();
 }
 
 webqq::~webqq()
 {
-	impl->stop_schedule_work();
+	impl->stop();
 }
 
 void webqq::on_verify_code( boost::function< void ( std::string ) >  cb )
@@ -58,7 +58,7 @@ void webqq::on_group_found( boost::function< void (qqGroup_ptr) > cb )
 	impl->siggroupnumber.connect(cb);
 }
 
-void webqq::on_group_newbee( boost::function<void ( qqGroup_ptr,  qqBuddy * )>  cb )
+void webqq::on_group_newbee( boost::function<void ( qqGroup_ptr,  qqBuddy_ptr )>  cb )
 {
 	impl->signewbuddy.connect(cb);
 }
@@ -80,9 +80,10 @@ qqGroup_ptr webqq::get_Group_by_qq( std::string qq )
 	return impl->get_Group_by_qq( qq );
 }
 
-void webqq::login_withvc( std::string vccode )
+void webqq::feed_vc( std::string vccode, boost::function<void()> bad_vcreporter)
 {
 	impl->m_vc_queue.push(vccode);
+	impl->m_sigbadvc = bad_vcreporter;
 }
 
 void webqq::send_group_message( std::string group, std::string msg, boost::function<void ( const boost::system::error_code& ec )> donecb )
@@ -183,11 +184,6 @@ void webqq::search_group( std::string groupqqnum, std::string vfcode, webqq::sea
 void webqq::join_group( qqGroup_ptr group, std::string vfcode, webqq::join_group_handler handler )
 {
 	impl->join_group(group, vfcode, handler);
-}
-
-void webqq::on_bad_vc(boost::function< void() > reporter)
-{
-	impl->m_sigbadvc = reporter;
 }
 
 } // namespace webqq

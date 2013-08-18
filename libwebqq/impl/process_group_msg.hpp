@@ -48,10 +48,13 @@ namespace webqq{
 namespace qqimpl{
 namespace detail{
 
+template<class Handler>
 struct process_group_message_op : boost::asio::coroutine
 {
-	process_group_message_op(boost::shared_ptr<WebQQ> webqq, const boost::property_tree::wptree& jstree/*, webqq::webqq_poll_handler_t handler*/)
-		: m_jstree(boost::make_shared<boost::property_tree::wptree>(jstree) ), m_webqq(webqq) //, m_handler(handler)
+	process_group_message_op(boost::shared_ptr<WebQQ> webqq, const boost::property_tree::wptree& jstree, Handler handler)
+		: m_jstree(boost::make_shared<boost::property_tree::wptree>(jstree))
+		, m_webqq(webqq)
+		, m_handler(handler)
 	{
 		avloop_idle_post(m_webqq->get_ioservice(), boost::asio::detail::bind_handler(*this, boost::system::error_code(), std::string("") ) );
 	}
@@ -67,8 +70,32 @@ struct process_group_message_op : boost::asio::coroutine
 
 		pt::wptree::value_type * content;
 
-		reenter(this)
+		BOOST_ASIO_CORO_REENTER(this)
 		{
+
+			if (!m_webqq->m_buddy_mgr.get_group_by_gid(group_code))
+			{
+				// 群号未知! 需要重新登录.
+				ec = error::make_error_code(error::poll_failed_need_refresh);
+			}
+			else
+			{
+				if (!m_webqq->m_buddy_mgr.get_buddy_by_uin(who))
+				{
+					// 新人? TODO 需要刷新群信息.
+					BOOST_ASIO_CORO_YIELD m_webqq->update_group_member(
+						m_webqq->m_buddy_mgr.get_group_by_gid(group_code),
+						boost::bind<void>(*this, _1, url)
+					);
+
+					if (m_webqq->m_buddy_mgr.get_buddy_by_uin(who))
+						m_webqq->signewbuddy(
+							m_webqq->m_buddy_mgr.get_group_by_gid(group_code),
+							m_webqq->m_buddy_mgr.get_buddy_by_uin(who)
+						);
+				}
+			}
+
 			m_iterator = m_jstree->get_child( L"value.content" ).begin();
 			m_iterator_end = m_jstree->get_child( L"value.content" ).end();
 
@@ -88,9 +115,13 @@ struct process_group_message_op : boost::asio::coroutine
 					else if( content->second.begin()->second.data() == L"face" )
 					{
 						msg.type = qqMsg::LWQQ_MSG_FACE;
-						int wface = boost::lexical_cast<int>( content->second.rbegin()->second.data() );
+
+						int wface = boost::lexical_cast<int>(
+							content->second.rbegin()->second.data()
+						);
+
 						msg.face = m_webqq->facemap[wface];
-						messagecontent.push_back( msg );
+						messagecontent.push_back(msg);
 					}
 					else if( content->second.begin()->second.data() == L"cface" )
 					{
@@ -98,15 +129,28 @@ struct process_group_message_op : boost::asio::coroutine
 						msg.cface.uin = who;
 						msg.cface.gid = m_webqq->get_Group_by_gid( group_code )->code;
 
-						msg.cface.file_id = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"file_id" ) );
-						msg.cface.name = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"name" ) );
+						msg.cface.file_id = wide_utf8(
+							content->second.rbegin()->second.get<std::wstring>(L"file_id")
+						);
+						msg.cface.name = wide_utf8(
+							content->second.rbegin()->second.get<std::wstring>(L"name")
+						);
 						msg.cface.vfwebqq = m_webqq->m_vfwebqq;
-						msg.cface.key = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"key" ) );
-						msg.cface.server = wide_utf8( content->second.rbegin()->second.get<std::wstring> ( L"server" ) );
-						msg.cface.cookie = m_webqq->m_cookie_mgr.get_cookie("http://web.qq.com/cgi-bin/get_group_pic")() ;
+						msg.cface.key = wide_utf8(
+							content->second.rbegin()->second.get<std::wstring> (L"key")
+						);
+						msg.cface.server = wide_utf8(
+							content->second.rbegin()->second.get<std::wstring> (L"server")
+						);
 
-						BOOST_ASIO_CORO_YIELD
-							webqq::async_cface_url_final(m_webqq->get_ioservice(), msg.cface, *this );
+						msg.cface.cookie = m_webqq->m_cookie_mgr.get_cookie(
+							"http://web.qq.com/cgi-bin/get_group_pic"
+						)() ;
+
+						BOOST_ASIO_CORO_YIELD webqq::async_cface_url_final(
+							m_webqq->get_ioservice(), msg.cface, *this
+						);
+
 						msg.cface.gchatpicurl = url;
 
 						messagecontent.push_back( msg );
@@ -116,33 +160,48 @@ struct process_group_message_op : boost::asio::coroutine
 				{
 					//聊天字符串就在这里.
 					msg.type = qqMsg::LWQQ_MSG_TEXT;
-					msg.text = wide_utf8( content->second.data() );
+					msg.text = wide_utf8(content->second.data());
 					messagecontent.push_back( msg );
 				}
 			}
 
+			m_handler(ec);
+
 			m_webqq->siggroupmessage( group_code, who, messagecontent );
+
 		}
 
 	}
 
 private:
 	boost::shared_ptr<WebQQ> m_webqq;
+	Handler m_handler;
+
 	boost::shared_ptr<boost::property_tree::wptree> m_jstree;
 	boost::property_tree::wptree * value_content;
 	boost::property_tree::wptree::iterator	m_iterator, m_iterator_end;
 	std::vector<qqMsg>	messagecontent;
 	qqMsg msg;
-
 };
 
-}
-
-template<class Webqq>
-detail::process_group_message_op process_group_message(boost::shared_ptr<Webqq> webqq, const boost::property_tree::wptree& jstree)
+template<class Handler>
+process_group_message_op<Handler>
+make_process_group_message_op(boost::shared_ptr<WebQQ> webqq,
+	const boost::property_tree::wptree& jstree,
+	Handler handler)
 {
-	return detail::process_group_message_op(webqq, jstree);
+	return process_group_message_op<Handler>(webqq, jstree, handler);
 }
 
+
 }
+
+template<class Handler>
+void process_group_message(boost::shared_ptr<WebQQ> webqq,
+	const boost::property_tree::wptree& jstree, Handler handler)
+{
+	detail::make_process_group_message_op(webqq, jstree, handler);
+}
+
+} // namespace qqimpl
 } // namespace webqq

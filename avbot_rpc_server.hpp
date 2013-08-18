@@ -57,11 +57,14 @@ public:
 	typedef boost::asio::ip::tcp Protocol;
 	typedef boost::asio::basic_stream_socket<Protocol> socket_type;
 
-	avbot_rpc_server( boost::shared_ptr<socket_type> _socket, on_message_signal_type & on_message )
+	template<typename T>
+	avbot_rpc_server( boost::shared_ptr<socket_type> _socket,
+		on_message_signal_type & on_message, T do_search_func)
 		: m_socket( _socket )
 		, m_streambuf( new boost::asio::streambuf )
 		, m_responses(boost::ref(_socket->get_io_service()), 20)
 		, broadcast_message(on_message)
+		, do_search(do_search_func)
 	{
 	}
 
@@ -73,7 +76,7 @@ public:
 		);
 		m_connect = broadcast_message.connect(boost::bind<void>(&avbot_rpc_server::callback_message, this, _1));
 	}
-
+private:
 	void get_response_sended(boost::shared_ptr< boost::asio::streambuf > v, boost::system::error_code ec, std::size_t);
 	void on_pop(boost::shared_ptr<boost::asio::streambuf> v);
 
@@ -82,6 +85,7 @@ public:
 
 	// signal 的回调到这里
 	void callback_message(const boost::property_tree::ptree & jsonmessage );
+	void done_search(boost::system::error_code ec, boost::property_tree::ptree);
 private:
 	boost::shared_ptr<socket_type> m_socket;
 
@@ -95,6 +99,13 @@ private:
 			boost::shared_ptr<boost::asio::streambuf>
 		>
 	> m_responses;
+
+	boost::function<void(
+		std::string c,
+		std::string q,
+		std::string date,
+		boost::function<void (boost::system::error_code, pt::ptree)> cb
+	)> do_search;
 
 	int process_post( std::size_t bytestransfered );
 };

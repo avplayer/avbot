@@ -42,7 +42,7 @@ struct irc_msg
 typedef boost::function<void(irc_msg msg)> privmsg_cb;
 
 namespace  impl {
-class client;
+class client_impl;
 }
 
 class client
@@ -60,7 +60,7 @@ public:
 
 	void chat(const std::string whom, const std::string msg);
 private:
-	boost::shared_ptr<impl::client> impl;
+	boost::shared_ptr<impl::client_impl> impl;
 };
 
 }

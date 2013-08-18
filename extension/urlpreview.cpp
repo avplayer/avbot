@@ -27,7 +27,7 @@ static inline std::string get_char_set( std::string type,  const std::string & h
 	boost::cmatch what;
 	// 首先是 text/html; charset=XXX
 	boost::regex ex( "charset=([a-zA-Z0-9\\-]+)" );
-	boost::regex ex2( "<meta charset=([a-zA-Z0-9]+)\"?>" );
+	boost::regex ex2( "<meta charset=[\"\']?([a-zA-Z0-9\\-]+)[\"\']?" );
 
 	if( boost::regex_search( type.c_str(), what, ex ) )
 	{
@@ -37,6 +37,14 @@ static inline std::string get_char_set( std::string type,  const std::string & h
 	{
 		return what[1];
 	}
+	else if( boost::regex_search( header.c_str(), what, ex ) )
+	{
+		return what[1];
+	}
+	else if( boost::regex_search( header.c_str(), what, ex2 ) )
+	{
+		return what[1];
+	}	
 
 	return "utf8";
 }
@@ -216,7 +224,7 @@ void urlpreview::operator()( boost::property_tree::ptree message )
 	// 统一为
 	// http[s]?://[^ ].*
 	// 使用 boost_regex_search
-	boost::regex ex( "https?://([0-9\\.a-zA-Z]+)(:[\\d]+)?(/[a-zA-Z\\d\\$\\-_\\.\\+!\\*',%&,\\?\\.=]*)?" );
+	boost::regex ex( "https?://[\\w\\d\\.\\?\\$\\-\\+\\|&@#/%=~_!:,]*[\\w\\d\\+&@#/%=~_\\|\\$]" );
 	boost::cmatch what;
 	
 	while(boost::regex_search( txt.c_str(), what, ex ))

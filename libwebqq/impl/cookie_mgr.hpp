@@ -335,12 +335,13 @@ inline boost::posix_time::ptime ptime_from_gmt_string(std::string date)
 
 }
 
+class cookie_store;
+
 /*
  * 表示一个 cookie 对象,  可以获取用户 cookie: 的字符串,  也可以继续操纵其存储的 cookie
  */
 class cookie{
 	std::vector<std::pair<std::string, std::string> > m_cookies;
-public:
 
 	cookie(std::vector<std::string> names, std::vector<std::string> values)
 	{
@@ -351,6 +352,8 @@ public:
 			m_cookies.push_back(std::make_pair(names[i], values[i]));
 		}
 	}
+	friend class cookie_store;
+public:
 
 	operator bool()
 	{
@@ -388,6 +391,7 @@ class cookie_store : boost::noncopyable
 
 	void check_db_initialized()
 	{
+		soci::transaction trans(db);
 		db <<
 			"create table if not exists cookies ("
 				"`domain` TEXT not null,"
@@ -396,6 +400,7 @@ class cookie_store : boost::noncopyable
 				"`value` TEXT not null default \"\", "
 				"`expiration` TEXT not null default \"session\""
 			");";
+		trans.commit();
 	}
 
 	// 以 set-cookie: 行的字符串设置 cookie
@@ -499,6 +504,7 @@ public:
 
  	cookie_store(const std::string & dbpath = std::string(":memory:"))
 	{
+		sqlite_api::sqlite3_enable_shared_cache(1);
 		db.open(soci::sqlite3, dbpath);
 		check_db_initialized();
 	}
@@ -559,7 +565,11 @@ public:
 		std::vector<soci::indicator> inds_names;
 		std::vector<soci::indicator> inds_values;
 
-		std::string sql = boost::str(boost::format("select name, value from cookies where %s and %s") % build_domain_conditions(url.host()) % build_path_conditions(url.path()) );
+		std::string sql = boost::str(
+			boost::format("select name, value from cookies where %s and %s")
+				% build_domain_conditions(url.host())
+				% build_path_conditions(url.path())
+		);
 
 		db << sql , soci::into(names, inds_names), soci::into(values, inds_values) ;
 
@@ -617,7 +627,8 @@ public:
 		using namespace soci;
 		transaction transac(db);
 
-		db<< "delete from cookies where domain = :domain and path = :path and name = :name" ,  use(domain), use(path), use(name);
+		db<< "delete from cookies where domain = :domain and path = :path and name = :name"
+			, use(domain), use(path), use(name);
 
 		db << "insert into cookies (domain, path, name, value, expiration) values ( :name  , :value  , :domain, :path , :expiration)"
 			, use(domain), use(path), use(name), use(value), use(expiration) ;
@@ -628,7 +639,8 @@ public:
 	void delete_cookie(std::string domain, std::string path, std::string name)
 	{
 		using namespace soci;
-		db<< "delete from cookies where domain = :domain and path = :path and name = :name" ,  use(domain), use(path), use(name);
+		db<< "delete from cookies where domain = :domain and path = :path and name = :name"
+		  , use(domain), use(path), use(name);
 	}
 };
 

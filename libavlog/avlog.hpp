@@ -97,8 +97,9 @@ protected:
 	// 创建对应的日志文件, 返回日志文件指针.
 	ofstream_ptr create_file( const std::string &groupid ) const;
 
+public:
 	// 得到当前时间字符串, 对应printf格式: "%04d-%02d-%02d %02d:%02d:%02d"
-	std::string current_time() const
+	static std::string current_time()
 	{
 		std::ostringstream oss;
 		boost::posix_time::time_facet* _facet = new boost::posix_time::time_facet( "%Y-%m-%d %H:%M:%S%F" );

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.6)
 project(libirc)
 
-find_package(Boost 1.54 REQUIRED COMPONENTS date_time system regex)
+find_package(Boost 1.54 REQUIRED COMPONENTS date_time system regex log thread)
 
 include_directories(${Boost_INCLUDE_DIRS})
 

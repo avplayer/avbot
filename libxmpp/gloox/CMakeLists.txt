@@ -12,6 +12,7 @@ if(NOT WIN32)
 
 endif()
 
+remove_definitions(-DWIN32_LEAN_AND_MEAN)
 
 SET( GLOOX_SRC
 gloox/amp.cpp

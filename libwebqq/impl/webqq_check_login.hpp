@@ -178,11 +178,18 @@ private:
 };
 
 template<class Handler>
-check_login_op<Handler> check_login(boost::shared_ptr<qqimpl::WebQQ> webqq, Handler handler)
+check_login_op<Handler> make_check_login_op(boost::shared_ptr<qqimpl::WebQQ> webqq, Handler handler)
 {
 	return check_login_op<Handler>(webqq, handler);
 }
 
+} // namespace detail
+
+template<class Handler>
+void async_check_login(boost::shared_ptr<qqimpl::WebQQ> webqq, Handler handler)
+{
+	detail::make_check_login_op(webqq, handler);
 }
-}
-}
+
+} // namespace qqimpl
+} // namespace webqq

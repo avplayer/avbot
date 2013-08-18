@@ -51,6 +51,7 @@ typedef boost::shared_ptr<avhttp::http_stream> read_streamptr;
 #include "../webqq.hpp"
 #include "../error_code.hpp"
 #include "cookie_mgr.hpp"
+#include "buddy_mgr.hpp"
 
 #if !defined(_MSC_VER)
 #pragma GCC visibility push(hidden)
@@ -99,12 +100,12 @@ class SYMBOL_HIDDEN WebQQ  : public boost::enable_shared_from_this<WebQQ>
 public:
 	using boost::enable_shared_from_this<WebQQ>::shared_from_this;
 public:
-	WebQQ( boost::asio::io_service & asioservice, std::string qqnum, std::string passwd);
+	WebQQ(boost::asio::io_service & asioservice, std::string qqnum, std::string passwd, bool no_persistent_db=false);
 
 	// called by webqq.hpp
-	void start_schedule_work();
+	void start();
 	// called by webqq.hpp distructor
-	void stop_schedule_work();
+	void stop();
 	
 	// change status. This is the last step of login process.
 	void change_status(LWQQ_STATUS status, boost::function<void (boost::system::error_code) > handler);
@@ -141,7 +142,7 @@ public:// signals
 	// 获得一个群QQ号码的时候激发.
 	boost::signals2::signal< void ( qqGroup_ptr )> siggroupnumber;
 	// 新人入群的时候激发.
-	boost::signals2::signal< void ( qqGroup_ptr, qqBuddy * buddy) > signewbuddy;
+	boost::signals2::signal< void ( qqGroup_ptr, qqBuddy_ptr buddy) > signewbuddy;
 
 	// 有群消息的时候激发.
 	boost::signals2::signal< void ( const std::string group, const std::string who, const std::vector<qqMsg> & )> siggroupmessage;
@@ -153,9 +154,6 @@ public:
 
 	void get_verify_image( std::string vcimgid, webqq::webqq_handler_string_t handler);
 
-	void cb_group_member_process_json(pt::ptree	&jsonobj, boost::shared_ptr<qqGroup>);
-	void cb_group_member( const boost::system::error_code& ec, read_streamptr stream, boost::shared_ptr<boost::asio::streambuf>, boost::shared_ptr<qqGroup>, webqq::webqq_handler_t handler);
-
 	void cb_newbee_group_join(qqGroup_ptr group, std::string uid);
 
 	void cb_search_group(std::string, const boost::system::error_code& ec, read_streamptr stream,  boost::shared_ptr<boost::asio::streambuf> buf, webqq::search_group_handler handler);
@@ -166,7 +164,7 @@ public:
 	void cb_join_group(qqGroup_ptr, const boost::system::error_code& ec, read_streamptr stream,  boost::shared_ptr<boost::asio::streambuf> buf, webqq::join_group_handler handler);
 
 public:
-	std::string	m_vfwebqq;
+
 
 public:
 	boost::asio::io_service & m_io_service;
@@ -177,7 +175,9 @@ public:
 	std::string m_nick; // nick of the avbot account
 
 	std::string	m_version;
-	std::string m_clientid, m_psessionid;
+	std::string m_clientid;
+	std::string m_psessionid;
+	std::string	m_vfwebqq;
 	std::string m_login_sig; // 安全参数
 	long m_msg_id; // update on every message.
 
@@ -186,8 +186,6 @@ public:
 	grouplist	m_groups;
 
 	std::map<int, int> facemap;
-
-	cookie::cookie_store m_cookie_mgr;
 
 	// 消息发送异步列队
 	boost::async_coro_queue<
@@ -203,9 +201,7 @@ public:
 
 	typedef boost::tuple<
 		webqq::webqq_handler_t  // 更新回调，如果push的那个数据被更新到了就会回调.
-		, int   // 更新类型.
 		, std::string   // 群 QQ 号  为空表示更新所有的群.
-		, std::string   // new user id, 如果是 type = 2 的话
 	> group_refresh_queue_type;
 
 	// 用于重新刷新群列表的异步命令列队
@@ -213,6 +209,10 @@ public:
 		// 列队里数据解释
 		std::list<group_refresh_queue_type>
 	> m_group_refresh_queue;
+
+	cookie::cookie_store m_cookie_mgr;
+
+	buddy_mgr	m_buddy_mgr;
 };
 
 };

@@ -77,26 +77,33 @@ public:
 			return;
 		}
 
-		std::wstring response = utf8_wide( std::string( boost::asio::buffer_cast<const char*>( m_buffer->data() ) , m_buffer->size() ) );
+		m_jstree = boost::make_shared<pt::wptree>();
 
-		pt::wptree	jstree;
+		std::wstring response = utf8_wide(
+			std::string(
+				boost::asio::buffer_cast<const char*>(m_buffer->data()) , m_buffer->size()
+			)
+		);
+
 
 		std::wstringstream jsondata;
 		jsondata << response;
 
+		int retcode;
+
+		ec =  boost::system::error_code();
+
 		//处理!
 		try
 		{
-			pt::json_parser::read_json( jsondata, jstree );
+			pt::json_parser::read_json( jsondata, *m_jstree );
 
-			int retcode = jstree.get<int>( L"retcode" );
-
-			ec =  boost::system::error_code();
+			retcode = m_jstree->get<int>( L"retcode" );
 
 			if(retcode == 116)
 			{
 				// update ptwebqq
-				std::string ptwebqq = wide_utf8( jstree.get<std::wstring>( L"p") );
+				std::string ptwebqq = wide_utf8(m_jstree->get<std::wstring>( L"p"));
 				m_webqq->m_cookie_mgr.save_cookie("qq.com", "/", "ptwebqq", ptwebqq, "session");
 				ec =  boost::system::error_code();
 			}else if(retcode == 102)
@@ -116,72 +123,106 @@ public:
 				ec = error::make_error_code(error::poll_failed_unknow_ret_code);
 			}else
 			{
-				//
-				BOOST_FOREACH( const pt::wptree::value_type & result, jstree.get_child( L"result" ) )
-				{
-					std::string poll_type = wide_utf8( result.second.get<std::wstring>( L"poll_type" ) );
-
-					if (poll_type != "group_message"){
-						js::write_json( std::wcout, jstree );
-					}
-					if( poll_type == "group_message" )
-					{
-						process_group_message(m_webqq, result.second );
-					} else if( poll_type == "sys_g_msg" )
-					{
-						//群消息.
-						if( result.second.get<std::wstring>( L"value.type" ) == L"group_join" )
-						{
-							// 新人进来 !
-							// 检查一下新人.
-							// 这个是群号.
-							std::string groupnumber = wide_utf8(result.second.get<std::wstring>(L"value.t_gcode"));
-							std::string newuseruid = wide_utf8(result.second.get<std::wstring>(L"value.new_member"));
-
-							qqGroup_ptr group = m_webqq->get_Group_by_gid(groupnumber);
-
-							// 报告一下新人入群!
-							m_webqq->m_group_refresh_queue.push(
-								boost::make_tuple(
-									// callback
-									boost::bind(&WebQQ::cb_newbee_group_join, m_webqq, group, newuseruid),
-									1,
-									groupnumber,
-									newuseruid
-								)
-							);
-						}else if(result.second.get<std::wstring>( L"value.type" ) == L"group_leave")
-						{
-							// 旧人滚蛋.
-						}
-					} else if( poll_type == "buddylist_change" ) {
-						//群列表变化了，reload列表.
-						js::write_json( std::wcout, result.second );
-					} else if( poll_type == "kick_message" ) {
-						js::write_json( std::wcout, result.second );
-						//强制下线了，重登录.
-						ec = error::make_error_code(error::poll_failed_user_kicked_off);
-					}
-				}
+				retcode = 0;
 			}
-
-			return m_webqq->get_ioservice().post(
-				boost::asio::detail::bind_handler(
-					m_handler, ec
-				)
-			);
 		}
 		catch( const pt::ptree_error & badpath )
 		{
 			BOOST_LOG_TRIVIAL(error) <<  __FILE__ << " : " << __LINE__ << " : " <<  "bad path" <<  badpath.what();
+			// 出现网络错误
+			m_webqq->get_ioservice().post(
+				boost::asio::detail::bind_handler(
+					m_handler,
+					error::make_error_code(error::poll_failed_network_error)
+				)
+			);
+			return;
 		}
-		// 出现网络错误
+
+		if (retcode)
+		{
+			return m_webqq->get_ioservice().post(
+				boost::bind<void>(m_handler, ec)
+			);
+		}
+
 		m_webqq->get_ioservice().post(
-			boost::asio::detail::bind_handler(
-				m_handler,
-				error::make_error_code(error::poll_failed_network_error)
-			)
+			boost::bind<void>(*this, boost::system::error_code())
 		);
+	}
+
+	void operator()(boost::system::error_code ec)
+	{
+		std::string poll_type;
+ 		pt::wptree::value_type * result;
+
+		BOOST_ASIO_CORO_REENTER(this)
+		{
+
+			m_iterator = m_jstree->get_child( L"result" ).begin();
+			m_iterator_end = m_jstree->get_child( L"result" ).end();
+
+			for( ; m_iterator != m_iterator_end; m_iterator ++ )
+			{
+				result = &(*m_iterator);
+
+				poll_type = wide_utf8( result->second.get<std::wstring>( L"poll_type" ) );
+
+				if (poll_type != "group_message")
+				{
+					js::write_json( std::wcout, *m_jstree );
+				}
+				else if( poll_type == "group_message" )
+				{
+					BOOST_ASIO_CORO_YIELD process_group_message(
+						m_webqq, result->second,
+						*this
+					);
+				}
+				else if( poll_type == "sys_g_msg" )
+				{
+					//群消息.
+					if( result->second.get<std::wstring>( L"value.type" ) == L"group_join" )
+					{
+						// 新人进来 !
+						// 检查一下新人.
+						// 这个是群号.
+						std::string groupnumber = wide_utf8(
+							result->second.get<std::wstring>(L"value.t_gcode")
+						);
+
+						std::string newuseruid = wide_utf8(
+							result->second.get<std::wstring>(L"value.new_member")
+						);
+
+						qqGroup_ptr group = m_webqq->get_Group_by_gid(groupnumber);
+
+						// 报告一下新人入群!
+						m_webqq->m_group_refresh_queue.push(
+							boost::make_tuple(
+								// callback
+								boost::bind(&WebQQ::cb_newbee_group_join, m_webqq, group, newuseruid),
+								groupnumber
+							)
+						);
+					}else if(result->second.get<std::wstring>( L"value.type" ) == L"group_leave")
+					{
+						// 旧人滚蛋.
+					}
+				} else if( poll_type == "buddylist_change" ) {
+					//群列表变化了，reload列表.
+					js::write_json( std::wcout, result->second );
+				} else if( poll_type == "kick_message" ) {
+					js::write_json( std::wcout, result->second );
+					//强制下线了，重登录.
+					ec = error::make_error_code(error::poll_failed_user_kicked_off);
+				}
+			}
+
+			return m_webqq->get_ioservice().post(
+				boost::bind<void>(m_handler, ec)
+			);
+		}
 	}
 
 private:
@@ -189,6 +230,10 @@ private:
 	Handler m_handler;
 	boost::shared_ptr<avhttp::http_stream> m_stream;
 	boost::shared_ptr<boost::asio::streambuf> m_buffer;
+
+	//
+	boost::shared_ptr<pt::wptree> m_jstree;
+	boost::property_tree::wptree::iterator m_iterator, m_iterator_end;
 };
 
 }
