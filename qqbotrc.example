@@ -22,7 +22,7 @@ ircrooms=进入的IRC频道
 # XMPP 是可选设置的账户
 
 
-xmppusera= XMPP 账户, 带 @
+xmppuser= XMPP 账户, 带 @
 xmpppwd=密码
 
 # 如果XMPP服务器使用的不是 @ 后面的那个地址, 需要在这里设定使用的服务器地址
