@@ -21,10 +21,10 @@ namespace po = boost::program_options;
 
 #include "smtp.hpp"
 
-static void sended( const boost::system::error_code & ec )
+static void sended( const boost::system::error_code & ec ,boost::asio::io_service* io)
 {
 	std::cout <<  ec.message() <<  std::endl;
-}
+	io->stop();
 
 #include "fsconfig.ipp"
 
@@ -70,6 +70,7 @@ int main( int argc, char * argv[] )
 	}
 
 	boost::asio::io_service io;
+	boost::asio::io_service::work word( io );
 	mx::smtp smtp( io, mailaddr, mailpasswd, mailserver );
 	InternetMailFormat imf;
 
@@ -86,7 +87,7 @@ int main( int argc, char * argv[] )
 
 	std::string _mdata = boost::asio::buffer_cast<const char*>( buf.data() );
 
-	smtp.async_sendmail( imf, sended );
+	smtp.async_sendmail( imf, boost::bind( sended,_1,&io ) );
 
 	avloop_run(io);
 }
