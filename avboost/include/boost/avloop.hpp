@@ -169,7 +169,8 @@ static inline void avloop_run(boost::asio::io_service& io_service)
 	if (!boost::asio::has_service<IdleService>(io_service))
 		boost::asio::add_service(io_service, new IdleService(io_service));
 
-	while (!io_service.stopped())
+	while (!io_service.stopped() ||
+	        boost::asio::use_service<IdleService>(io_service).has_idle())
 	{
 		if(!boost::asio::use_service<IdleService>(io_service).has_idle())
 		{
@@ -181,6 +182,8 @@ static inline void avloop_run(boost::asio::io_service& io_service)
 			while (io_service.poll());
 			// 执行 idle handler!
 			boost::asio::use_service<IdleService>(io_service).poll_one();
+			if (!io_service.stopped())
+			    io_service.reset();
 		}
 	}
 }
